@@ -1,6 +1,7 @@
 package com.spriteoffset
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -45,6 +46,8 @@ class MainActivity : Activity() {
     private var playpalSourceName = "PLAYPAL"
     private var currentDoomPatchName = "sprite"
     private var updatingPaletteSpinner = false
+    private var currentArchiveEntries: List<DoomArchiveSprite> = emptyList()
+    private var currentArchiveName = ""
 
     companion object {
         private const val REQUEST_IMAGE = 41
@@ -86,7 +89,7 @@ class MainActivity : Activity() {
             setPadding(0, dp(3), 0, dp(14))
         })
 
-        val openButton = makeButton("Abrir imagen")
+        val openButton = makeButton("Abrir imagen o WAD/PK3")
         content.addView(openButton, matchWrap())
         openButton.setOnClickListener { openImagePicker() }
 
@@ -332,35 +335,99 @@ class MainActivity : Activity() {
         try {
             val bytes = readDocument(uri)
             val name = queryDisplayName(uri) ?: "Imagen"
-            val raster = decodeRaster(bytes)
-            currentDisplayName = name.substringBeforeLast('.', name).ifBlank { "sprite" }
-
-            if (raster != null) {
-                currentBitmap = raster
-                currentDoomPatch = null
-                val pngOffsets = PngOffsetChunk.readOffsets(bytes)
-                offsetX = pngOffsets?.first ?: 0
-                offsetY = pngOffsets?.second ?: 0
-                val formatLabel = if (pngOffsets != null) {
-                    "PNG · grAb offsets"
-                } else {
-                    "Imagen"
-                }
-                imageInfo.text = name + " · " + raster.width + " × " + raster.height + " px · " + formatLabel
-                savePatchButton.isEnabled = false
-                preview.image = raster
-                setOffset(true, offsetX)
-                setOffset(false, offsetY)
-                syncOffsetFields()
+            if (DoomArchiveReader.isArchive(bytes)) {
+                openArchiveBytes(bytes, name)
             } else {
-                currentDoomPatch = bytes
-                currentDoomPatchName = name
-                renderCurrentDoomPatch(resetOffsets = true)
+                openResourceBytes(bytes, name)
             }
         } catch (error: Exception) {
             Toast.makeText(this, "No se pudo abrir el archivo: " + error.message, Toast.LENGTH_LONG).show()
         } catch (error: OutOfMemoryError) {
-            Toast.makeText(this, "La imagen es demasiado grande para este dispositivo", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "El archivo es demasiado grande para este dispositivo", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun openArchiveBytes(bytes: ByteArray, archiveName: String) {
+        val contents = DoomArchiveReader.read(bytes)
+        currentArchiveName = archiveName
+        currentArchiveEntries = contents.sprites
+        currentDoomPatch = null
+        currentBitmap = null
+        preview.image = null
+        savePatchButton.isEnabled = false
+
+        if (contents.playpalBytes != null) {
+            applyPlaypalBytes(
+                contents.playpalBytes,
+                "$archiveName / PLAYPAL"
+            )
+        } else {
+            updatePaletteInfo()
+        }
+
+        if (contents.sprites.isEmpty()) {
+            imageInfo.text = "$archiveName · ${contents.formatName} · no se encontraron sprites gráficos"
+            Toast.makeText(
+                this,
+                "No se encontraron sprites en el archivo",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+
+        val labels = contents.sprites.map { entry ->
+            val sizeLabel = if (entry.bytes.size >= 1024) {
+                String.format(
+                    java.util.Locale.ROOT,
+                    "%.1f KB",
+                    entry.bytes.size / 1024f
+                )
+            } else {
+                "${entry.bytes.size} B"
+            }
+            "${entry.name}  ·  $sizeLabel"
+        }.toTypedArray()
+
+        AlertDialog.Builder(this)
+            .setTitle("Sprites de $archiveName")
+            .setItems(labels) { _, which ->
+                val entry = currentArchiveEntries.getOrNull(which) ?: return@setItems
+                openResourceBytes(entry.bytes, entry.name)
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun openResourceBytes(bytes: ByteArray, resourceName: String) {
+        val raster = decodeRaster(bytes)
+        currentDisplayName = resourceName.substringAfterLast('/')
+            .substringBeforeLast('.', resourceName)
+            .ifBlank { "sprite" }
+
+        if (raster != null) {
+            currentBitmap = raster
+            currentDoomPatch = null
+            val pngOffsets = PngOffsetChunk.readOffsets(bytes)
+            offsetX = pngOffsets?.first ?: 0
+            offsetY = pngOffsets?.second ?: 0
+            val formatLabel = if (pngOffsets != null) {
+                "PNG · grAb offsets"
+            } else {
+                "Imagen"
+            }
+            imageInfo.text = resourceName + " · " +
+                raster.width + " × " + raster.height + " px · " + formatLabel
+            savePatchButton.isEnabled = false
+            preview.image = raster
+            setOffset(true, offsetX)
+            setOffset(false, offsetY)
+            syncOffsetFields()
+        } else {
+            currentDoomPatch = bytes
+            currentDoomPatchName = currentDisplayName
+            renderCurrentDoomPatch(resetOffsets = true)
+            imageInfo.text = resourceName + " · " +
+                imageInfo.text.toString().substringAfter(" · ")
         }
     }
 
@@ -375,20 +442,11 @@ class MainActivity : Activity() {
     private fun openPlaypalDocument(uri: Uri) {
         try {
             val bytes = readDocument(uri)
-            val palettes = DoomPlaypalCodec.parse(bytes)
             val name = queryDisplayName(uri) ?: "PLAYPAL"
-
-            playpalPalettes = palettes
-            playpalSourceName = name
-            selectedPaletteIndex = 0
-            updatePaletteSpinnerItems()
-
-            if (currentDoomPatch != null) {
-                renderCurrentDoomPatch(resetOffsets = false)
-            }
+            applyPlaypalBytes(bytes, name)
             Toast.makeText(
                 this,
-                "PLAYPAL cargado: ${palettes.size} paletas",
+                "PLAYPAL cargado: ${playpalPalettes.size} paletas",
                 Toast.LENGTH_LONG
             ).show()
         } catch (error: Exception) {
@@ -397,6 +455,18 @@ class MainActivity : Activity() {
                 "No se pudo leer PLAYPAL: " + error.message,
                 Toast.LENGTH_LONG
             ).show()
+        }
+    }
+
+    private fun applyPlaypalBytes(bytes: ByteArray, sourceName: String) {
+        val palettes = DoomPlaypalCodec.parse(bytes)
+        playpalPalettes = palettes
+        playpalSourceName = sourceName
+        selectedPaletteIndex = 0
+        updatePaletteSpinnerItems()
+
+        if (currentDoomPatch != null) {
+            renderCurrentDoomPatch(resetOffsets = false)
         }
     }
 

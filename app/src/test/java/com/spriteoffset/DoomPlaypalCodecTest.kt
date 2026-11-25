@@ -5,6 +5,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.ByteArrayOutputStream
 import java.nio.charset.Charset
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 class DoomPlaypalCodecTest {
     @Test
@@ -39,6 +41,25 @@ class DoomPlaypalCodecTest {
 
         assertEquals(1, palettes.size)
         assertEquals(0xFF0C2238.toInt(), palettes[0][0])
+    }
+
+    @Test
+    fun parsesPlaypalStoredInsidePk3() {
+        val raw = ByteArray(768)
+        raw[0] = 80.toByte()
+        raw[1] = 120.toByte()
+        raw[2] = 200.toByte()
+        val output = ByteArrayOutputStream()
+        ZipOutputStream(output).use { zip ->
+            zip.putNextEntry(ZipEntry("acs/PLAYPAL"))
+            zip.write(raw)
+            zip.closeEntry()
+        }
+
+        val palettes = DoomPlaypalCodec.parse(output.toByteArray())
+
+        assertEquals(1, palettes.size)
+        assertEquals(0xFF5078C8.toInt(), palettes[0][0])
     }
 
     @Test(expected = IllegalArgumentException::class)

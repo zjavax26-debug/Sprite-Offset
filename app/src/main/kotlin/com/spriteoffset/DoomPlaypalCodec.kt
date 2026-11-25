@@ -2,9 +2,12 @@ package com.spriteoffset
 
 import java.nio.charset.Charset
 import java.util.Locale
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.util.zip.ZipInputStream
 
 /**
- * Reads a raw PLAYPAL lump or locates PLAYPAL inside a classic IWAD/PWAD.
+ * Reads a raw PLAYPAL lump or locates PLAYPAL inside IWAD/PWAD and ZIP/PK3 archives.
  *
  * A palette is 256 RGB triples (768 bytes). Each PLAYPAL palette is stored
  * consecutively, without a per-palette header.
@@ -19,10 +22,10 @@ internal object DoomPlaypalCodec {
     fun parse(rawOrWad: ByteArray): List<IntArray> {
         require(rawOrWad.isNotEmpty()) { "El archivo PLAYPAL está vacío" }
 
-        val playpalBytes = if (isWad(rawOrWad)) {
-            extractPlaypalFromWad(rawOrWad)
-        } else {
-            rawOrWad
+        val playpalBytes = when {
+            isWad(rawOrWad) -> extractPlaypalFromWad(rawOrWad)
+            isZip(rawOrWad) -> extractPlaypalFromZip(rawOrWad)
+            else -> rawOrWad
         }
 
         require(playpalBytes.isNotEmpty()) { "El lump PLAYPAL está vacío" }
@@ -48,6 +51,52 @@ internal object DoomPlaypalCodec {
             }
             palette
         }
+    }
+
+    private fun isZip(bytes: ByteArray): Boolean {
+        return bytes.size >= 4 &&
+            bytes[0] == 0x50.toByte() &&
+            bytes[1] == 0x4B.toByte() &&
+            (bytes[2] == 0x03.toByte() ||
+                bytes[2] == 0x05.toByte() ||
+                bytes[2] == 0x07.toByte())
+    }
+
+    private fun extractPlaypalFromZip(zipBytes: ByteArray): ByteArray {
+        var result: ByteArray? = null
+        var entries = 0
+
+        ZipInputStream(ByteArrayInputStream(zipBytes)).use { input ->
+            while (true) {
+                val entry = input.nextEntry ?: break
+                entries++
+                require(entries <= 50_000) { "El PK3 contiene demasiados archivos" }
+
+                if (!entry.isDirectory) {
+                    val baseName = entry.name.substringAfterLast('/')
+                        .substringAfterLast('/')
+                        .uppercase(Locale.ROOT)
+                    if (baseName == "PLAYPAL" || baseName == "PLAYPAL.PAL") {
+                        val output = ByteArrayOutputStream()
+                        val buffer = ByteArray(4096)
+                        var total = 0
+                        while (true) {
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            total += count
+                            require(total <= 2 * 1024 * 1024) {
+                                "El recurso PLAYPAL del PK3 supera 2 MB"
+                            }
+                            output.write(buffer, 0, count)
+                        }
+                        result = output.toByteArray()
+                    }
+                }
+                input.closeEntry()
+            }
+        }
+
+        return result ?: throw IllegalArgumentException("No se encontró PLAYPAL dentro del PK3")
     }
 
     private fun isWad(bytes: ByteArray): Boolean {
