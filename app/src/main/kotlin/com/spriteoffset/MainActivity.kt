@@ -44,7 +44,7 @@ class MainActivity : Activity() {
 
         val scroll = ScrollView(this).apply {
             setBackgroundColor(Color.rgb(17, 24, 39))
-            fillViewport = true
+            setFillViewport(true)
         }
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
