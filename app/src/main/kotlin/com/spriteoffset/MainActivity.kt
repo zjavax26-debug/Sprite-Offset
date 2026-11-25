@@ -1,6 +1,7 @@
 package com.spriteoffset
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -350,6 +351,10 @@ class MainActivity : Activity() {
         val contents = DoomArchiveReader.read(bytes)
         currentArchiveName = archiveName
         currentArchiveEntries = contents.sprites
+        currentDoomPatch = null
+        currentBitmap = null
+        preview.image = null
+        savePatchButton.isEnabled = false
 
         if (contents.playpalBytes != null) {
             applyPlaypalBytes(
