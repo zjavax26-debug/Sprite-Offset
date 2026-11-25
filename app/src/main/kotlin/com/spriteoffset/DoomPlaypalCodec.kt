@@ -7,7 +7,7 @@ import java.io.ByteArrayOutputStream
 import java.util.zip.ZipInputStream
 
 /**
- * Reads a raw PLAYPAL lump or locates PLAYPAL inside a classic IWAD/PWAD.
+ * Reads a raw PLAYPAL lump or locates PLAYPAL inside IWAD/PWAD and ZIP/PK3 archives.
  *
  * A palette is 256 RGB triples (768 bytes). Each PLAYPAL palette is stored
  * consecutively, without a per-palette header.
