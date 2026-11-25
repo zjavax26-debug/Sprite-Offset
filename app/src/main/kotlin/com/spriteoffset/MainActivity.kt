@@ -542,8 +542,8 @@ private class SpritePreviewView(context: android.content.Context) : View(context
                 val scale = max(0.0001f, lastRenderScale)
                 val dx = event.x - lastTouchX
                 val dy = event.y - lastTouchY
-                offsetX = (offsetX - dx / scale).roundToInt().coerceIn(-8192, 8192)
-                offsetY = (offsetY - dy / scale).roundToInt().coerceIn(-8192, 8192)
+                offsetX = (offsetX - dx / scale).roundToInt().coerceIn(-32768, 32767)
+                offsetY = (offsetY - dy / scale).roundToInt().coerceIn(-32768, 32767)
                 lastTouchX = event.x
                 lastTouchY = event.y
                 onOffsetsChanged?.invoke(offsetX, offsetY)
