@@ -103,14 +103,12 @@ class MainActivity : Activity() {
         modeRow.addView(spinner, LinearLayout.LayoutParams(0, dp(48), 1f))
         content.addView(modeRow)
 
-        preview = SpritePreviewView(this).apply {
+        preview = SpritePreviewView(this, scroll).apply {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(330)
             ).apply { topMargin = dp(5); bottomMargin = dp(12) }
             onOffsetsChanged = { x, y ->
-                offsetX = x
-                offsetY = y
-                syncOffsetFields()
+                applyPreviewOffsets(x, y)
             }
         }
         content.addView(preview)
@@ -218,6 +216,14 @@ class MainActivity : Activity() {
         preview.offsetX = offsetX
         preview.offsetY = offsetY
         if (updateField) syncOffsetFields()
+    }
+
+    private fun applyPreviewOffsets(x: Int, y: Int) {
+        offsetX = x
+        offsetY = y
+        preview.offsetX = x
+        preview.offsetY = y
+        syncOffsetFields()
     }
 
     private fun syncOffsetFields() {
@@ -413,7 +419,10 @@ class MainActivity : Activity() {
     private fun dp(value: Int) = (value * resources.displayMetrics.density).roundToInt()
 }
 
-private class SpritePreviewView(context: android.content.Context) : View(context) {
+private class SpritePreviewView(
+    context: android.content.Context,
+    private val parentScrollView: ScrollView
+) : View(context) {
     var image: Bitmap? = null
         set(value) { field = value; invalidate() }
     var previewMode = "Auto"
@@ -438,11 +447,11 @@ private class SpritePreviewView(context: android.content.Context) : View(context
         strokeWidth = dp(1.2f)
     }
     private var dragging = false
-    private var dragStartX = 0f
-    private var dragStartY = 0f
-    private var dragStartOffsetX = 0
-    private var dragStartOffsetY = 0
-    private var dragStartScale = 1f
+    private var lastTouchX = 0f
+    private var lastTouchY = 0f
+    private var dragScale = 1f
+    private var fractionalOffsetX = 0f
+    private var fractionalOffsetY = 0f
     private var lastRenderScale = 1f
 
     init {
@@ -550,36 +559,66 @@ private class SpritePreviewView(context: android.content.Context) : View(context
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (image == null || previewMode == "Graphic") return false
+
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 dragging = true
-                dragStartX = event.x
-                dragStartY = event.y
-                dragStartOffsetX = offsetX
-                dragStartOffsetY = offsetY
-                dragStartScale = max(0.0001f, lastRenderScale)
-                parent?.requestDisallowInterceptTouchEvent(true)
+                lastTouchX = event.x
+                lastTouchY = event.y
+                dragScale = max(0.0001f, lastRenderScale)
+                fractionalOffsetX = 0f
+                fractionalOffsetY = 0f
+
+                // The preview lives inside a vertical ScrollView. Lock that
+                // parent for the whole drag so it cannot steal the gesture.
+                parentScrollView.requestDisallowInterceptTouchEvent(true)
+                isPressed = true
                 return true
             }
+
             MotionEvent.ACTION_MOVE -> {
                 if (!dragging) return false
 
-                // Calculate from the original touch position, not the previous
-                // MotionEvent. This preserves small fractional movements between
-                // events instead of rounding each tiny delta away.
-                val deltaX = (event.x - dragStartX) / dragStartScale
-                val deltaY = (event.y - dragStartY) / dragStartScale
-                offsetX = (dragStartOffsetX - deltaX).roundToInt()
-                offsetY = (dragStartOffsetY - deltaY).roundToInt()
+                // Accumulate fractional image-pixel movement across MotionEvents.
+                // This also keeps the preview responsive at low zoom levels.
+                fractionalOffsetX += (lastTouchX - event.x) / dragScale
+                fractionalOffsetY += (lastTouchY - event.y) / dragScale
 
+                val wholeX = fractionalOffsetX.roundToInt()
+                val wholeY = fractionalOffsetY.roundToInt()
+                if (wholeX != 0) {
+                    offsetX = (offsetX.toLong() + wholeX.toLong())
+                        .coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()).toInt()
+                    fractionalOffsetX -= wholeX
+                }
+                if (wholeY != 0) {
+                    offsetY = (offsetY.toLong() + wholeY.toLong())
+                        .coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()).toInt()
+                    fractionalOffsetY -= wholeY
+                }
+
+                lastTouchX = event.x
+                lastTouchY = event.y
+
+                // Notify the Activity on every move so both numeric fields and
+                // the saved/exported offsets are always synchronized.
                 onOffsetsChanged?.invoke(offsetX, offsetY)
                 invalidate()
                 return true
             }
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+
+            MotionEvent.ACTION_UP -> {
                 dragging = false
-                parent?.requestDisallowInterceptTouchEvent(false)
+                isPressed = false
+                parentScrollView.requestDisallowInterceptTouchEvent(false)
                 performClick()
+                return true
+            }
+
+            MotionEvent.ACTION_CANCEL -> {
+                dragging = false
+                isPressed = false
+                parentScrollView.requestDisallowInterceptTouchEvent(false)
                 return true
             }
         }
