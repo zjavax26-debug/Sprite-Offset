@@ -42,6 +42,7 @@ class MainActivity : Activity() {
     private lateinit var paletteInfo: TextView
     private var playpalPalettes: List<IntArray> = emptyList()
     private var selectedPaletteIndex = -1
+    private var playpalSourceName = "PLAYPAL"
     private var currentDoomPatchName = "sprite"
     private var updatingPaletteSpinner = false
 
@@ -378,9 +379,9 @@ class MainActivity : Activity() {
             val name = queryDisplayName(uri) ?: "PLAYPAL"
 
             playpalPalettes = palettes
+            playpalSourceName = name
             selectedPaletteIndex = 0
             updatePaletteSpinnerItems()
-            paletteInfo.text = "$name · ${palettes.size} paletas · 256 colores por paleta"
 
             if (currentDoomPatch != null) {
                 renderCurrentDoomPatch(resetOffsets = false)
@@ -427,9 +428,9 @@ class MainActivity : Activity() {
             playpalPalettes.isEmpty() ->
                 "Sin PLAYPAL cargado · vista en escala de grises"
             selectedPaletteIndex < 0 ->
-                "PLAYPAL cargado · vista en escala de grises"
+                "$playpalSourceName · vista en escala de grises"
             else ->
-                "PLAYPAL cargado · usando paleta $selectedPaletteIndex de ${playpalPalettes.size}"
+                "$playpalSourceName · paleta $selectedPaletteIndex de ${playpalPalettes.size - 1}"
         }
     }
 
