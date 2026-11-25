@@ -22,6 +22,7 @@ import android.widget.*
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import java.io.ByteArrayOutputStream
 
 class MainActivity : Activity() {
     private lateinit var preview: SpritePreviewView
@@ -31,10 +32,21 @@ class MainActivity : Activity() {
     private var offsetX = 0
     private var offsetY = 0
     private var updatingFields = false
+    private var currentBitmap: Bitmap? = null
+    private var currentDoomPatch: ByteArray? = null
+    private var currentDisplayName = "sprite"
+    private var pendingPatchBytes: ByteArray? = null
+    private var pendingPngBitmap: Bitmap? = null
+    private lateinit var savePatchButton: Button
 
     companion object {
         private const val REQUEST_IMAGE = 41
-        private const val MAX_OFFSET = 8192
+        private const val REQUEST_SAVE_PATCH = 42
+        private const val REQUEST_EXPORT_PNG = 43
+        private const val MAX_OFFSET = 32767
+        private const val MIN_OFFSET = -32768
+        private const val MAX_INPUT_BYTES = 64 * 1024 * 1024
+        private const val MAX_IMAGE_PIXELS = 32_000_000L
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -149,8 +161,18 @@ class MainActivity : Activity() {
         zoomRow.addView(zoomLabel, LinearLayout.LayoutParams(dp(48), dp(48)))
         content.addView(zoomRow)
 
+        content.addView(sectionLabel("Guardar y exportar"))
+        savePatchButton = makeButton("Guardar offsets como Doom Patch")
+        savePatchButton.isEnabled = false
+        content.addView(savePatchButton, matchWrap())
+        savePatchButton.setOnClickListener { saveDoomPatch() }
+
+        val exportButton = makeButton("Exportar vista a PNG")
+        content.addView(exportButton, matchWrap())
+        exportButton.setOnClickListener { exportPng() }
+
         content.addView(TextView(this).apply {
-            text = "En Sprite y HUD puedes arrastrar la imagen para ajustar sus offsets. Esta versión es un visor inicial; todavía no escribe formatos Doom."
+            text = "Los offsets se guardan en el encabezado Doom Patch sin modificar los píxeles comprimidos. El PNG exportado no almacena offsets. Los Doom Patch se muestran provisionalmente en escala de grises hasta incorporar PLAYPAL."
             textSize = 12f
             setTextColor(Color.rgb(155, 169, 190))
             setPadding(0, dp(8), 0, 0)
@@ -191,7 +213,7 @@ class MainActivity : Activity() {
     }
 
     private fun setOffset(isX: Boolean, value: Int, updateField: Boolean = true) {
-        val safe = value.coerceIn(-MAX_OFFSET, MAX_OFFSET)
+        val safe = value.coerceIn(MIN_OFFSET, MAX_OFFSET)
         if (isX) offsetX = safe else offsetY = safe
         preview.offsetX = offsetX
         preview.offsetY = offsetY
@@ -209,29 +231,77 @@ class MainActivity : Activity() {
     private fun openImagePicker() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
-            type = "image/*"
+            type = "*/*"
         }
         startActivityForResult(intent, REQUEST_IMAGE)
     }
 
-    @Deprecated("Using the document picker keeps compatibility with Android 8")
+    @Deprecated("Document picker callback kept compatible with Android 8")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != REQUEST_IMAGE || resultCode != RESULT_OK) return
-        val uri: Uri = data?.data ?: return
+        if (resultCode != RESULT_OK) return
+        val uri = data?.data ?: return
+        when (requestCode) {
+            REQUEST_IMAGE -> openSelectedDocument(uri)
+            REQUEST_SAVE_PATCH -> writePendingBytes(uri, pendingPatchBytes, "Doom Patch")
+            REQUEST_EXPORT_PNG -> writePendingPng(uri)
+        }
+    }
+
+    private fun readDocument(uri: Uri): ByteArray {
+        val output = ByteArrayOutputStream()
+        contentResolver.openInputStream(uri)?.use { input ->
+            val buffer = ByteArray(16 * 1024)
+            var total = 0
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                total += count
+                require(total <= MAX_INPUT_BYTES) { "El archivo supera el límite de 64 MB" }
+                output.write(buffer, 0, count)
+            }
+        } ?: throw IllegalArgumentException("No se pudo leer el archivo")
+        return output.toByteArray()
+    }
+
+    private fun decodeRaster(bytes: ByteArray): Bitmap? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        require(bounds.outWidth.toLong() * bounds.outHeight.toLong() <= MAX_IMAGE_PIXELS) {
+            "La imagen es demasiado grande"
+        }
+        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+    }
+
+    private fun openSelectedDocument(uri: Uri) {
         try {
-            val decoded = contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
-                ?: throw IllegalArgumentException("No se pudo leer la imagen")
-            preview.image = decoded
-            offsetX = 0
-            offsetY = 0
-            preview.offsetX = 0
-            preview.offsetY = 0
-            syncOffsetFields()
+            val bytes = readDocument(uri)
             val name = queryDisplayName(uri) ?: "Imagen"
-            imageInfo.text = "$name · ${decoded.width} × ${decoded.height} px"
+            val raster = decodeRaster(bytes)
+            if (raster != null) {
+                currentBitmap = raster
+                currentDoomPatch = null
+                offsetX = 0
+                offsetY = 0
+                imageInfo.text = name + " · " + raster.width + " × " + raster.height + " px · Imagen"
+                savePatchButton.isEnabled = false
+            } else {
+                val patch = DoomPatchCodec.decode(bytes)
+                currentBitmap = patch.bitmap
+                currentDoomPatch = bytes
+                offsetX = patch.leftOffset
+                offsetY = patch.topOffset
+                imageInfo.text = name + " · " + patch.width + " × " + patch.height + " px · Doom Patch (escala de grises)"
+                savePatchButton.isEnabled = true
+            }
+            currentDisplayName = name.substringBeforeLast('.', name).ifBlank { "sprite" }
+            preview.image = currentBitmap
+            setOffset(true, offsetX)
+            setOffset(false, offsetY)
+            syncOffsetFields()
         } catch (error: Exception) {
-            Toast.makeText(this, "No se pudo abrir la imagen: ${error.message}", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "No se pudo abrir el archivo: " + error.message, Toast.LENGTH_LONG).show()
         } catch (error: OutOfMemoryError) {
             Toast.makeText(this, "La imagen es demasiado grande para este dispositivo", Toast.LENGTH_LONG).show()
         }
@@ -240,6 +310,65 @@ class MainActivity : Activity() {
     private fun queryDisplayName(uri: Uri): String? {
         return contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
             if (it.moveToFirst()) it.getString(0) else null
+        }
+    }
+
+    private fun saveDoomPatch() {
+        val original = currentDoomPatch ?: return
+        try {
+            pendingPatchBytes = DoomPatchCodec.withOffsets(original, offsetX, offsetY)
+            val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "application/octet-stream"
+                putExtra(Intent.EXTRA_TITLE, currentDisplayName + "_offsets.lmp")
+            }
+            startActivityForResult(intent, REQUEST_SAVE_PATCH)
+        } catch (error: Exception) {
+            Toast.makeText(this, "No se pudo preparar el Doom Patch: " + error.message, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun exportPng() {
+        val bitmap = currentBitmap
+        if (bitmap == null) {
+            Toast.makeText(this, "Primero abre una imagen", Toast.LENGTH_SHORT).show()
+            return
+        }
+        pendingPngBitmap = bitmap
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "image/png"
+            putExtra(Intent.EXTRA_TITLE, currentDisplayName + "_preview.png")
+        }
+        startActivityForResult(intent, REQUEST_EXPORT_PNG)
+    }
+
+    private fun writePendingBytes(uri: Uri, bytes: ByteArray?, label: String) {
+        if (bytes == null) return
+        try {
+            contentResolver.openOutputStream(uri, "w")?.use { it.write(bytes) }
+                ?: throw IllegalArgumentException("No se pudo crear el archivo")
+            Toast.makeText(this, label + " guardado correctamente", Toast.LENGTH_LONG).show()
+        } catch (error: Exception) {
+            Toast.makeText(this, "Error al guardar: " + error.message, Toast.LENGTH_LONG).show()
+        } finally {
+            pendingPatchBytes = null
+        }
+    }
+
+    private fun writePendingPng(uri: Uri) {
+        val bitmap = pendingPngBitmap ?: return
+        try {
+            contentResolver.openOutputStream(uri, "w")?.use { output ->
+                if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) {
+                    throw IllegalStateException("No se pudo codificar el PNG")
+                }
+            } ?: throw IllegalArgumentException("No se pudo crear el archivo")
+            Toast.makeText(this, "PNG exportado correctamente (sin offsets)", Toast.LENGTH_LONG).show()
+        } catch (error: Exception) {
+            Toast.makeText(this, "Error al exportar PNG: " + error.message, Toast.LENGTH_LONG).show()
+        } finally {
+            pendingPngBitmap = null
         }
     }
 
