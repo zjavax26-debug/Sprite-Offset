@@ -73,7 +73,7 @@ internal object DoomPlaypalCodec {
                 require(entries <= 50_000) { "El PK3 contiene demasiados archivos" }
 
                 if (!entry.isDirectory) {
-                    val baseName = entry.name.replace('\\\\', '/')
+                    val baseName = entry.name.substringAfterLast('/')
                         .substringAfterLast('/')
                         .uppercase(Locale.ROOT)
                     if (baseName == "PLAYPAL" || baseName == "PLAYPAL.PAL") {
