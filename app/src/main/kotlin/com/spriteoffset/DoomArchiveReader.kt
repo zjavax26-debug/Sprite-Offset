@@ -136,7 +136,8 @@ internal object DoomArchiveReader {
     }
 
     private fun readZip(zipBytes: ByteArray): DoomArchiveContents {
-        val sprites = ArrayList<DoomArchiveSprite>()
+        val spritesFolderEntries = ArrayList<DoomArchiveSprite>()
+        val otherGraphicsEntries = ArrayList<DoomArchiveSprite>()
         var playpal: ByteArray? = null
         var entryCount = 0
         var selectedBytes = 0L
@@ -175,8 +176,10 @@ internal object DoomArchiveReader {
 
                     if (isPlaypal) {
                         playpal = data
-                    } else if (isSpritePath || isImageFile || isPatchFile) {
-                        sprites.add(DoomArchiveSprite(normalizedName, data))
+                    } else if (isSpritePath) {
+                        spritesFolderEntries.add(DoomArchiveSprite(normalizedName, data))
+                    } else if (isImageFile || isPatchFile) {
+                        otherGraphicsEntries.add(DoomArchiveSprite(normalizedName, data))
                     }
                 }
 
@@ -184,7 +187,14 @@ internal object DoomArchiveReader {
             }
         }
 
-        return DoomArchiveContents(sprites, playpal, "PK3")
+        // Prefer the explicit sprites/ folder when present so texture and UI
+        // graphics elsewhere in the PK3 do not flood the sprite picker.
+        val selectedSprites = if (spritesFolderEntries.isNotEmpty()) {
+            spritesFolderEntries
+        } else {
+            otherGraphicsEntries
+        }
+        return DoomArchiveContents(selectedSprites, playpal, "PK3")
     }
 
     private fun readZipEntryLimited(input: ZipInputStream, limit: Int): ByteArray {
