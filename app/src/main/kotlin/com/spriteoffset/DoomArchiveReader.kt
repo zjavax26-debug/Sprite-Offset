@@ -74,7 +74,9 @@ internal object DoomArchiveReader {
 
         val lumpCount = readU32LE(wad, 4)
         val directoryOffset = readU32LE(wad, 8)
-        require(lumpCount in 1..MAX_WAD_LUMPS) { "Número de lumps WAD no válido" }
+        require(lumpCount >= 1L && lumpCount <= MAX_WAD_LUMPS) {
+            "Número de lumps WAD no válido"
+        }
 
         val directoryEnd = directoryOffset + lumpCount * 16L
         require(directoryOffset >= 12L && directoryEnd <= wad.size.toLong()) {
@@ -117,9 +119,9 @@ internal object DoomArchiveReader {
             }
 
             if (dataSize <= 0L || name.isBlank()) continue
-            val start = dataOffset.toInt()
-            val lumpBytes = wad.copyOfRange(start, start + dataSize.toInt())
-            allLumps.add(RawWadLump(name, lumpBytes, insideSprites))
+            allLumps.add(
+                RawWadLump(name, dataOffset.toInt(), dataSize.toInt(), insideSprites)
+            )
         }
 
         // Prefer the WAD's explicit sprite namespace. Some PWADs omit markers,
@@ -131,7 +133,12 @@ internal object DoomArchiveReader {
             allLumps.filter { looksLikeSpriteName(it.name) }
         }
 
-        val sprites = selected.map { DoomArchiveSprite(it.name, it.bytes) }
+        val sprites = selected.map { lump ->
+            DoomArchiveSprite(
+                lump.name,
+                wad.copyOfRange(lump.offset, lump.offset + lump.size)
+            )
+        }
         return DoomArchiveContents(sprites, playpal, "WAD")
     }
 
@@ -226,7 +233,8 @@ internal object DoomArchiveReader {
 
     private data class RawWadLump(
         val name: String,
-        val bytes: ByteArray,
+        val offset: Int,
+        val size: Int,
         val inSpriteNamespace: Boolean
     )
 
