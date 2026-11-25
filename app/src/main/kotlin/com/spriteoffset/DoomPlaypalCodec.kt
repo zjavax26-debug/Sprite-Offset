@@ -61,7 +61,9 @@ internal object DoomPlaypalCodec {
 
         val lumpCount = readU32LE(wad, 4)
         val directoryOffset = readU32LE(wad, 8)
-        require(lumpCount in 1..1_000_000L) { "Número de lumps WAD no válido" }
+        require(lumpCount >= 1L && lumpCount <= 1_000_000L) {
+            "Número de lumps WAD no válido"
+        }
 
         val directoryEnd = directoryOffset + lumpCount * 16L
         require(directoryOffset >= 12L && directoryEnd <= wad.size.toLong()) {
