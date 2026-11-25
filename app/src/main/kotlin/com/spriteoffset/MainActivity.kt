@@ -216,7 +216,7 @@ class MainActivity : Activity() {
         exportButton.setOnClickListener { exportPng() }
 
         content.addView(TextView(this).apply {
-            text = "Los PNG compatibles con Doom pueden guardar offsets X/Y en el bloque grAb. El guardado de Doom Patch conserva sus píxeles comprimidos. Los Doom Patch se muestran provisionalmente en escala de grises hasta incorporar PLAYPAL."
+            text = "Carga un lump PLAYPAL extraído o un archivo IWAD/PWAD que lo contenga. Puedes elegir cualquiera de sus paletas; los espacios transparentes del Doom Patch se conservan. El guardado del Patch no altera sus píxeles comprimidos y el PNG exportado conserva los offsets grAb."
             textSize = 12f
             setTextColor(Color.rgb(155, 169, 190))
             setPadding(0, dp(8), 0, 0)
