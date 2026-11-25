@@ -38,11 +38,19 @@ class MainActivity : Activity() {
     private var pendingPatchBytes: ByteArray? = null
     private var pendingPngBitmap: Bitmap? = null
     private lateinit var savePatchButton: Button
+    private lateinit var paletteSpinner: Spinner
+    private lateinit var paletteInfo: TextView
+    private var playpalPalettes: List<IntArray> = emptyList()
+    private var selectedPaletteIndex = -1
+    private var playpalSourceName = "PLAYPAL"
+    private var currentDoomPatchName = "sprite"
+    private var updatingPaletteSpinner = false
 
     companion object {
         private const val REQUEST_IMAGE = 41
         private const val REQUEST_SAVE_PATCH = 42
         private const val REQUEST_EXPORT_PNG = 43
+        private const val REQUEST_PLAYPAL = 44
         private const val MAX_OFFSET = Int.MAX_VALUE
         private const val MIN_OFFSET = Int.MIN_VALUE
         private const val MAX_INPUT_BYTES = 64 * 1024 * 1024
@@ -89,6 +97,45 @@ class MainActivity : Activity() {
             setPadding(0, dp(9), 0, dp(9))
         }
         content.addView(imageInfo)
+
+        content.addView(sectionLabel("Paleta de colores"))
+        val paletteRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val openPaletteButton = makeButton("Abrir PLAYPAL")
+        paletteRow.addView(openPaletteButton, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, dp(48)
+        ))
+        openPaletteButton.setOnClickListener { openPlaypalPicker() }
+
+        paletteSpinner = Spinner(this)
+        paletteSpinner.adapter = paletteAdapter(listOf("Escala de grises"))
+        paletteRow.addView(paletteSpinner, LinearLayout.LayoutParams(0, dp(48), 1f).apply {
+            marginStart = dp(8)
+        })
+        content.addView(paletteRow)
+
+        paletteInfo = TextView(this).apply {
+            text = "Sin PLAYPAL cargado · vista en escala de grises"
+            textSize = 12f
+            setTextColor(Color.rgb(155, 169, 190))
+            setPadding(0, dp(2), 0, dp(8))
+        }
+        content.addView(paletteInfo)
+
+        paletteSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (updatingPaletteSpinner) return
+                val nextIndex = if (position == 0) -1 else position - 1
+                if (nextIndex != selectedPaletteIndex) {
+                    selectedPaletteIndex = nextIndex
+                    updatePaletteInfo()
+                    if (currentDoomPatch != null) renderCurrentDoomPatch(resetOffsets = false)
+                }
+            }
+        }
 
         val modeRow = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
@@ -170,7 +217,7 @@ class MainActivity : Activity() {
         exportButton.setOnClickListener { exportPng() }
 
         content.addView(TextView(this).apply {
-            text = "Los PNG compatibles con Doom pueden guardar offsets X/Y en el bloque grAb. El guardado de Doom Patch conserva sus píxeles comprimidos. Los Doom Patch se muestran provisionalmente en escala de grises hasta incorporar PLAYPAL."
+            text = "Carga un lump PLAYPAL extraído o un archivo IWAD/PWAD que lo contenga. Puedes elegir cualquiera de sus paletas; los espacios transparentes del Doom Patch se conservan. El guardado del Patch no altera sus píxeles comprimidos y el PNG exportado conserva los offsets grAb."
             textSize = 12f
             setTextColor(Color.rgb(155, 169, 190))
             setPadding(0, dp(8), 0, 0)
@@ -249,6 +296,7 @@ class MainActivity : Activity() {
         val uri = data?.data ?: return
         when (requestCode) {
             REQUEST_IMAGE -> openSelectedDocument(uri)
+            REQUEST_PLAYPAL -> openPlaypalDocument(uri)
             REQUEST_SAVE_PATCH -> writePendingBytes(uri, pendingPatchBytes, "Doom Patch")
             REQUEST_EXPORT_PNG -> writePendingPng(uri)
         }
@@ -285,6 +333,8 @@ class MainActivity : Activity() {
             val bytes = readDocument(uri)
             val name = queryDisplayName(uri) ?: "Imagen"
             val raster = decodeRaster(bytes)
+            currentDisplayName = name.substringBeforeLast('.', name).ifBlank { "sprite" }
+
             if (raster != null) {
                 currentBitmap = raster
                 currentDoomPatch = null
@@ -298,25 +348,115 @@ class MainActivity : Activity() {
                 }
                 imageInfo.text = name + " · " + raster.width + " × " + raster.height + " px · " + formatLabel
                 savePatchButton.isEnabled = false
+                preview.image = raster
+                setOffset(true, offsetX)
+                setOffset(false, offsetY)
+                syncOffsetFields()
             } else {
-                val patch = DoomPatchCodec.decode(bytes)
-                currentBitmap = patch.bitmap
                 currentDoomPatch = bytes
-                offsetX = patch.leftOffset
-                offsetY = patch.topOffset
-                imageInfo.text = name + " · " + patch.width + " × " + patch.height + " px · Doom Patch (escala de grises)"
-                savePatchButton.isEnabled = true
+                currentDoomPatchName = name
+                renderCurrentDoomPatch(resetOffsets = true)
             }
-            currentDisplayName = name.substringBeforeLast('.', name).ifBlank { "sprite" }
-            preview.image = currentBitmap
-            setOffset(true, offsetX)
-            setOffset(false, offsetY)
-            syncOffsetFields()
         } catch (error: Exception) {
             Toast.makeText(this, "No se pudo abrir el archivo: " + error.message, Toast.LENGTH_LONG).show()
         } catch (error: OutOfMemoryError) {
             Toast.makeText(this, "La imagen es demasiado grande para este dispositivo", Toast.LENGTH_LONG).show()
         }
+    }
+
+    private fun openPlaypalPicker() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+        }
+        startActivityForResult(intent, REQUEST_PLAYPAL)
+    }
+
+    private fun openPlaypalDocument(uri: Uri) {
+        try {
+            val bytes = readDocument(uri)
+            val palettes = DoomPlaypalCodec.parse(bytes)
+            val name = queryDisplayName(uri) ?: "PLAYPAL"
+
+            playpalPalettes = palettes
+            playpalSourceName = name
+            selectedPaletteIndex = 0
+            updatePaletteSpinnerItems()
+
+            if (currentDoomPatch != null) {
+                renderCurrentDoomPatch(resetOffsets = false)
+            }
+            Toast.makeText(
+                this,
+                "PLAYPAL cargado: ${palettes.size} paletas",
+                Toast.LENGTH_LONG
+            ).show()
+        } catch (error: Exception) {
+            Toast.makeText(
+                this,
+                "No se pudo leer PLAYPAL: " + error.message,
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+    private fun paletteAdapter(items: List<String>): ArrayAdapter<String> {
+        return ArrayAdapter(this, android.R.layout.simple_spinner_item, items).apply {
+            setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        }
+    }
+
+    private fun updatePaletteSpinnerItems() {
+        val items = mutableListOf("Escala de grises")
+        playpalPalettes.indices.forEach { index ->
+            items.add("PLAYPAL · Paleta $index (${index + 1}/${playpalPalettes.size})")
+        }
+
+        updatingPaletteSpinner = true
+        paletteSpinner.adapter = paletteAdapter(items)
+        paletteSpinner.setSelection(
+            if (selectedPaletteIndex < 0) 0 else selectedPaletteIndex + 1,
+            false
+        )
+        updatingPaletteSpinner = false
+        updatePaletteInfo()
+    }
+
+    private fun updatePaletteInfo() {
+        if (!::paletteInfo.isInitialized) return
+        paletteInfo.text = when {
+            playpalPalettes.isEmpty() ->
+                "Sin PLAYPAL cargado · vista en escala de grises"
+            selectedPaletteIndex < 0 ->
+                "$playpalSourceName · vista en escala de grises"
+            else ->
+                "$playpalSourceName · paleta $selectedPaletteIndex (${selectedPaletteIndex + 1}/${playpalPalettes.size})"
+        }
+    }
+
+    private fun renderCurrentDoomPatch(resetOffsets: Boolean) {
+        val bytes = currentDoomPatch ?: return
+        val palette = playpalPalettes.getOrNull(selectedPaletteIndex)
+        val patch = DoomPatchCodec.decode(bytes, palette)
+        currentBitmap = patch.bitmap
+        preview.image = patch.bitmap
+
+        if (resetOffsets) {
+            offsetX = patch.leftOffset
+            offsetY = patch.topOffset
+            setOffset(true, offsetX)
+            setOffset(false, offsetY)
+            syncOffsetFields()
+        }
+
+        val paletteLabel = if (palette == null) {
+            "escala de grises"
+        } else {
+            "PLAYPAL $selectedPaletteIndex"
+        }
+        imageInfo.text = currentDoomPatchName + " · " +
+            patch.width + " × " + patch.height + " px · Doom Patch · " + paletteLabel
+        savePatchButton.isEnabled = true
     }
 
     private fun queryDisplayName(uri: Uri): String? {

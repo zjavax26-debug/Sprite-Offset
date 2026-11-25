@@ -17,7 +17,10 @@ internal data class DecodedDoomPatch(
  * preserving the column directory and compressed posts byte-for-byte.
  */
 internal object DoomPatchCodec {
-    fun decode(bytes: ByteArray): DecodedDoomPatch {
+    fun decode(bytes: ByteArray, palette: IntArray? = null): DecodedDoomPatch {
+        require(palette == null || palette.size == 256) {
+            "La paleta debe contener exactamente 256 colores"
+        }
         require(bytes.size >= 8) { "Archivo demasiado pequeño para ser un Doom Patch" }
 
         val width = readU16(bytes, 0)
@@ -76,10 +79,13 @@ internal object DoomPatchCodec {
                     val targetY = actualTop + row
                     if (targetY in 0 until height) {
                         val paletteIndex = bytes[cursor + row].toInt() and 0xFF
-                        // PLAYPAL todavía no está integrado: usar escala de grises
-                        // permite visualizar estructura y transparencia sin alterar el original.
+                        // Doom graphics store palette indices, not direct RGB values.
+                        // Transparent gaps remain zero-alpha because the pixel array
+                        // starts initialized to zero.
                         pixels[targetY * width + column] =
-                            Color.rgb(paletteIndex, paletteIndex, paletteIndex)
+                            palette?.get(paletteIndex) ?: Color.rgb(
+                                paletteIndex, paletteIndex, paletteIndex
+                            )
                     }
                 }
 
