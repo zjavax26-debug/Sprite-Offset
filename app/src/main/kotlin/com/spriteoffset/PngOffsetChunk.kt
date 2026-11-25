@@ -29,11 +29,16 @@ internal object PngOffsetChunk {
 
             val typeOffset = cursor + 4
             if (matches(png, typeOffset, grabType)) {
-                if (dataLength != 8) return null
-                if (!validCrc(png, cursor, dataLength)) return null
+                // SLADE reads the grAb payload directly and does not reject it
+                // because of its stored CRC. Some existing Doom PNGs have a
+                // grAb chunk with a stale CRC but SLADE still displays the offsets.
+                // Accept at least the two 32-bit offset fields.
+                if (dataLength < 8) return null
                 val dataOffset = cursor + 8
                 return readI32(png, dataOffset) to readI32(png, dataOffset + 4)
             }
+
+            // SLADE scans the ancillary chunks between IHDR and the first IDAT.
             if (matches(png, typeOffset, idatType)) return null
             cursor = chunkEnd.toInt()
         }
