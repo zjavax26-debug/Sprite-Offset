@@ -409,7 +409,7 @@ class MainActivity : Activity() {
     private fun updatePaletteSpinnerItems() {
         val items = mutableListOf("Escala de grises")
         playpalPalettes.indices.forEach { index ->
-            items.add("PLAYPAL · Paleta $index")
+            items.add("PLAYPAL · Paleta $index (${index + 1}/${playpalPalettes.size})")
         }
 
         updatingPaletteSpinner = true
@@ -430,7 +430,7 @@ class MainActivity : Activity() {
             selectedPaletteIndex < 0 ->
                 "$playpalSourceName · vista en escala de grises"
             else ->
-                "$playpalSourceName · paleta $selectedPaletteIndex de ${playpalPalettes.size - 1}"
+                "$playpalSourceName · paleta $selectedPaletteIndex (${selectedPaletteIndex + 1}/${playpalPalettes.size})"
         }
     }
 
