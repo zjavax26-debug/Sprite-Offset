@@ -43,8 +43,8 @@ class MainActivity : Activity() {
         private const val REQUEST_IMAGE = 41
         private const val REQUEST_SAVE_PATCH = 42
         private const val REQUEST_EXPORT_PNG = 43
-        private const val MAX_OFFSET = 32767
-        private const val MIN_OFFSET = -32768
+        private const val MAX_OFFSET = Int.MAX_VALUE
+        private const val MIN_OFFSET = Int.MIN_VALUE
         private const val MAX_INPUT_BYTES = 64 * 1024 * 1024
         private const val MAX_IMAGE_PIXELS = 32_000_000L
     }
@@ -172,7 +172,7 @@ class MainActivity : Activity() {
         exportButton.setOnClickListener { exportPng() }
 
         content.addView(TextView(this).apply {
-            text = "Los offsets se guardan en el encabezado Doom Patch sin modificar los píxeles comprimidos. El PNG exportado no almacena offsets. Los Doom Patch se muestran provisionalmente en escala de grises hasta incorporar PLAYPAL."
+            text = "Los PNG compatibles con Doom pueden guardar offsets X/Y en el bloque grAb. El guardado de Doom Patch conserva sus píxeles comprimidos. Los Doom Patch se muestran provisionalmente en escala de grises hasta incorporar PLAYPAL."
             textSize = 12f
             setTextColor(Color.rgb(155, 169, 190))
             setPadding(0, dp(8), 0, 0)
@@ -282,9 +282,15 @@ class MainActivity : Activity() {
             if (raster != null) {
                 currentBitmap = raster
                 currentDoomPatch = null
-                offsetX = 0
-                offsetY = 0
-                imageInfo.text = name + " · " + raster.width + " × " + raster.height + " px · Imagen"
+                val pngOffsets = PngOffsetChunk.readOffsets(bytes)
+                offsetX = pngOffsets?.first ?: 0
+                offsetY = pngOffsets?.second ?: 0
+                val formatLabel = if (pngOffsets != null) {
+                    "PNG · grAb offsets"
+                } else {
+                    "Imagen"
+                }
+                imageInfo.text = name + " · " + raster.width + " × " + raster.height + " px · " + formatLabel
                 savePatchButton.isEnabled = false
             } else {
                 val patch = DoomPatchCodec.decode(bytes)
@@ -359,12 +365,19 @@ class MainActivity : Activity() {
     private fun writePendingPng(uri: Uri) {
         val bitmap = pendingPngBitmap ?: return
         try {
+            val bitmapStream = ByteArrayOutputStream()
+            if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, bitmapStream)) {
+                throw IllegalStateException("No se pudo codificar el PNG")
+            }
+            val pngWithOffsets = PngOffsetChunk.withOffsets(
+                bitmapStream.toByteArray(),
+                offsetX,
+                offsetY
+            )
             contentResolver.openOutputStream(uri, "w")?.use { output ->
-                if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) {
-                    throw IllegalStateException("No se pudo codificar el PNG")
-                }
+                output.write(pngWithOffsets)
             } ?: throw IllegalArgumentException("No se pudo crear el archivo")
-            Toast.makeText(this, "PNG exportado correctamente (sin offsets)", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "PNG exportado correctamente con offsets grAb", Toast.LENGTH_LONG).show()
         } catch (error: Exception) {
             Toast.makeText(this, "Error al exportar PNG: " + error.message, Toast.LENGTH_LONG).show()
         } finally {
@@ -425,9 +438,17 @@ private class SpritePreviewView(context: android.content.Context) : View(context
         strokeWidth = dp(1.2f)
     }
     private var dragging = false
-    private var lastTouchX = 0f
-    private var lastTouchY = 0f
+    private var dragStartX = 0f
+    private var dragStartY = 0f
+    private var dragStartOffsetX = 0
+    private var dragStartOffsetY = 0
+    private var dragStartScale = 1f
     private var lastRenderScale = 1f
+
+    init {
+        isClickable = true
+        isFocusable = true
+    }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
@@ -532,20 +553,25 @@ private class SpritePreviewView(context: android.content.Context) : View(context
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 dragging = true
-                lastTouchX = event.x
-                lastTouchY = event.y
+                dragStartX = event.x
+                dragStartY = event.y
+                dragStartOffsetX = offsetX
+                dragStartOffsetY = offsetY
+                dragStartScale = max(0.0001f, lastRenderScale)
                 parent?.requestDisallowInterceptTouchEvent(true)
                 return true
             }
             MotionEvent.ACTION_MOVE -> {
                 if (!dragging) return false
-                val scale = max(0.0001f, lastRenderScale)
-                val dx = event.x - lastTouchX
-                val dy = event.y - lastTouchY
-                offsetX = (offsetX - dx / scale).roundToInt().coerceIn(-32768, 32767)
-                offsetY = (offsetY - dy / scale).roundToInt().coerceIn(-32768, 32767)
-                lastTouchX = event.x
-                lastTouchY = event.y
+
+                // Calculate from the original touch position, not the previous
+                // MotionEvent. This preserves small fractional movements between
+                // events instead of rounding each tiny delta away.
+                val deltaX = (event.x - dragStartX) / dragStartScale
+                val deltaY = (event.y - dragStartY) / dragStartScale
+                offsetX = (dragStartOffsetX - deltaX).roundToInt()
+                offsetY = (dragStartOffsetY - deltaY).roundToInt()
+
                 onOffsetsChanged?.invoke(offsetX, offsetY)
                 invalidate()
                 return true
