@@ -165,7 +165,11 @@ internal object DoomArchiveReader {
                 val isImageFile = imageExtensions.any { lowerName.endsWith(it) }
                 val isPatchFile = lowerName.endsWith(".lmp") ||
                     lowerName.endsWith(".patch")
-                val shouldRead = isPlaypal || isSpritePath || isImageFile || isPatchFile
+                val hasNoExtension = normalizedName.substringAfterLast('/').let {
+                    !it.contains('.')
+                }
+                val isExtensionlessSprite = isSpritePath && hasNoExtension
+                val shouldRead = isPlaypal || isImageFile || isPatchFile || isExtensionlessSprite
 
                 if (shouldRead) {
                     val data = readZipEntryLimited(input, MAX_RESOURCE_BYTES)
