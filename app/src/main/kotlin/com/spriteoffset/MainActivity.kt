@@ -179,7 +179,7 @@ class MainActivity : Activity() {
         }
         modeRow.addView(makeLabel("Vista"))
         val spinner = Spinner(this)
-        val modes = listOf("Auto", "Graphic", "Sprite", "HUD")
+        val modes = listOf("Sprite", "HUD")
         val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, modes)
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         spinner.adapter = adapter
@@ -277,10 +277,12 @@ class MainActivity : Activity() {
                 )
             }
         } else {
+            // Y uses screen-style coordinates: decreasing Y moves the sprite down.
+            // Keep the DOWN arrow to the left of the value.
             makeDirectionalButton(
-                drawableRes = android.R.drawable.arrow_up_float,
+                drawableRes = android.R.drawable.arrow_down_float,
                 rotation = 0f,
-                description = "Disminuir offset Y"
+                description = "Mover sprite hacia abajo (disminuir offset Y)"
             ) {
                 setOffset(
                     false,
@@ -310,10 +312,12 @@ class MainActivity : Activity() {
                 )
             }
         } else {
+            // Increasing Y moves the sprite up in the Doom preview coordinate system.
+            // Keep the UP arrow to the right of the value.
             makeDirectionalButton(
-                drawableRes = android.R.drawable.arrow_down_float,
+                drawableRes = android.R.drawable.arrow_up_float,
                 rotation = 0f,
-                description = "Aumentar offset Y"
+                description = "Mover sprite hacia arriba (aumentar offset Y)"
             ) {
                 setOffset(
                     false,
@@ -663,9 +667,10 @@ class MainActivity : Activity() {
             }
         }
 
+        // Match the taller, near-full-screen archive picker used before search was added.
         val dialogHeight = min(
-            dp(560),
-            (resources.displayMetrics.heightPixels * 0.68f).toInt()
+            dp(760),
+            (resources.displayMetrics.heightPixels * 0.88f).toInt()
         )
         content.layoutParams = ViewGroup.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
@@ -1020,7 +1025,7 @@ private class SpritePreviewView(
 ) : View(context) {
     var image: Bitmap? = null
         set(value) { field = value; invalidate() }
-    var previewMode = "Auto"
+    var previewMode = "Sprite"
         set(value) { field = value; invalidate() }
     var offsetX = 0
         set(value) { field = value; invalidate() }
