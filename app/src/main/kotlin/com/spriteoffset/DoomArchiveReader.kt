@@ -9,7 +9,8 @@ import java.util.zip.ZipInputStream
 
 internal data class DoomArchiveSprite(
     val name: String,
-    val bytes: ByteArray
+    val bytes: ByteArray,
+    val entryIndex: Int
 )
 
 internal data class DoomArchiveContents(
@@ -120,7 +121,13 @@ internal object DoomArchiveReader {
 
             if (dataSize <= 0L || name.isBlank()) continue
             allLumps.add(
-                RawWadLump(name, dataOffset.toInt(), dataSize.toInt(), insideSprites)
+                RawWadLump(
+                    name = name,
+                    offset = dataOffset.toInt(),
+                    size = dataSize.toInt(),
+                    inSpriteNamespace = insideSprites,
+                    entryIndex = index
+                )
             )
         }
 
@@ -135,8 +142,9 @@ internal object DoomArchiveReader {
 
         val sprites = selected.map { lump ->
             DoomArchiveSprite(
-                lump.name,
-                wad.copyOfRange(lump.offset, lump.offset + lump.size)
+                name = lump.name,
+                bytes = wad.copyOfRange(lump.offset, lump.offset + lump.size),
+                entryIndex = lump.entryIndex
             )
         }
         return DoomArchiveContents(sprites, playpal, "WAD")
@@ -152,6 +160,7 @@ internal object DoomArchiveReader {
         ZipInputStream(ByteArrayInputStream(zipBytes)).use { input ->
             while (true) {
                 val entry: ZipEntry = input.nextEntry ?: break
+                val currentEntryIndex = entryCount
                 entryCount++
                 require(entryCount <= MAX_ZIP_ENTRIES) {
                     "El PK3 contiene demasiados archivos"
@@ -188,9 +197,9 @@ internal object DoomArchiveReader {
                     if (isPlaypal) {
                         playpal = data
                     } else if (isSpritePath) {
-                        spritesFolderEntries.add(DoomArchiveSprite(normalizedName, data))
+                        spritesFolderEntries.add(DoomArchiveSprite(normalizedName, data, currentEntryIndex))
                     } else if (isImageFile || isPatchFile) {
-                        otherGraphicsEntries.add(DoomArchiveSprite(normalizedName, data))
+                        otherGraphicsEntries.add(DoomArchiveSprite(normalizedName, data, currentEntryIndex))
                     }
                 }
 
@@ -235,7 +244,8 @@ internal object DoomArchiveReader {
         val name: String,
         val offset: Int,
         val size: Int,
-        val inSpriteNamespace: Boolean
+        val inSpriteNamespace: Boolean,
+        val entryIndex: Int
     )
 
     private fun readU32LE(data: ByteArray, offset: Int): Long {

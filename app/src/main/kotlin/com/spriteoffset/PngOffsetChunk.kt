@@ -16,6 +16,8 @@ internal object PngOffsetChunk {
     private val grabType = byteArrayOf(0x67, 0x72, 0x41, 0x62) // "grAb"
     private val idatType = byteArrayOf(0x49, 0x44, 0x41, 0x54) // "IDAT"
 
+    fun isPng(bytes: ByteArray): Boolean = hasPngSignature(bytes)
+
     fun readOffsets(png: ByteArray): Pair<Int, Int>? {
         if (!hasPngSignature(png)) return null
 

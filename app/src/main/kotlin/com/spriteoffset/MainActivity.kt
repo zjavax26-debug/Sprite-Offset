@@ -48,12 +48,17 @@ class MainActivity : Activity() {
     private var updatingPaletteSpinner = false
     private var currentArchiveEntries: List<DoomArchiveSprite> = emptyList()
     private var currentArchiveName = ""
+    private var currentArchiveBytes: ByteArray? = null
+    private var currentArchiveFormat: String? = null
+    private var currentArchiveEntryIndex = -1
+    private var currentResourceOriginalBytes: ByteArray? = null
 
     companion object {
         private const val REQUEST_IMAGE = 41
         private const val REQUEST_SAVE_PATCH = 42
         private const val REQUEST_EXPORT_PNG = 43
         private const val REQUEST_PLAYPAL = 44
+        private const val REQUEST_SAVE_ARCHIVE = 45
         private const val MAX_OFFSET = Int.MAX_VALUE
         private const val MIN_OFFSET = Int.MIN_VALUE
         private const val MAX_INPUT_BYTES = 64 * 1024 * 1024
@@ -213,7 +218,7 @@ class MainActivity : Activity() {
         savePatchButton = makeButton("Guardar offsets como Doom Patch")
         savePatchButton.isEnabled = false
         content.addView(savePatchButton, matchWrap())
-        savePatchButton.setOnClickListener { saveDoomPatch() }
+        savePatchButton.setOnClickListener { saveCurrentChanges() }
 
         val exportButton = makeButton("Exportar vista a PNG")
         content.addView(exportButton, matchWrap())
@@ -301,6 +306,7 @@ class MainActivity : Activity() {
             REQUEST_IMAGE -> openSelectedDocument(uri)
             REQUEST_PLAYPAL -> openPlaypalDocument(uri)
             REQUEST_SAVE_PATCH -> writePendingBytes(uri, pendingPatchBytes, "Doom Patch")
+            REQUEST_SAVE_ARCHIVE -> writePendingBytes(uri, pendingPatchBytes, "Copia del archivo")
             REQUEST_EXPORT_PNG -> writePendingPng(uri)
         }
     }
@@ -338,6 +344,7 @@ class MainActivity : Activity() {
             if (DoomArchiveReader.isArchive(bytes)) {
                 openArchiveBytes(bytes, name)
             } else {
+                clearArchiveContext()
                 openResourceBytes(bytes, name)
             }
         } catch (error: Exception) {
@@ -351,10 +358,14 @@ class MainActivity : Activity() {
         val contents = DoomArchiveReader.read(bytes)
         currentArchiveName = archiveName
         currentArchiveEntries = contents.sprites
+        currentArchiveBytes = bytes
+        currentArchiveFormat = contents.formatName
+        currentArchiveEntryIndex = -1
+        currentResourceOriginalBytes = null
         currentDoomPatch = null
         currentBitmap = null
         preview.image = null
-        savePatchButton.isEnabled = false
+        updateSaveButtonState()
 
         if (contents.playpalBytes != null) {
             applyPlaypalBytes(
@@ -392,13 +403,19 @@ class MainActivity : Activity() {
             .setTitle("Sprites de $archiveName")
             .setItems(labels) { _, which ->
                 val entry = currentArchiveEntries.getOrNull(which) ?: return@setItems
-                openResourceBytes(entry.bytes, entry.name)
+                openResourceBytes(entry.bytes, entry.name, entry.entryIndex)
             }
             .setNegativeButton("Cancelar", null)
             .show()
     }
 
-    private fun openResourceBytes(bytes: ByteArray, resourceName: String) {
+    private fun openResourceBytes(
+        bytes: ByteArray,
+        resourceName: String,
+        archiveEntryIndex: Int = -1
+    ) {
+        currentArchiveEntryIndex = archiveEntryIndex
+        currentResourceOriginalBytes = if (archiveEntryIndex >= 0) bytes else null
         val raster = decodeRaster(bytes)
         currentDisplayName = resourceName.substringAfterLast('/')
             .substringBeforeLast('.', resourceName)
@@ -422,10 +439,12 @@ class MainActivity : Activity() {
             setOffset(true, offsetX)
             setOffset(false, offsetY)
             syncOffsetFields()
+            updateSaveButtonState()
         } else {
             currentDoomPatch = bytes
             currentDoomPatchName = currentDisplayName
             renderCurrentDoomPatch(resetOffsets = true)
+            updateSaveButtonState()
             imageInfo.text = resourceName + " · " +
                 imageInfo.text.toString().substringAfter(" · ")
         }
@@ -532,6 +551,87 @@ class MainActivity : Activity() {
     private fun queryDisplayName(uri: Uri): String? {
         return contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
             if (it.moveToFirst()) it.getString(0) else null
+        }
+    }
+
+    private fun clearArchiveContext() {
+        currentArchiveEntries = emptyList()
+        currentArchiveName = ""
+        currentArchiveBytes = null
+        currentArchiveFormat = null
+        currentArchiveEntryIndex = -1
+        currentResourceOriginalBytes = null
+        updateSaveButtonState()
+    }
+
+    private fun updateSaveButtonState() {
+        if (!::savePatchButton.isInitialized) return
+
+        val inArchive = currentArchiveBytes != null && currentArchiveEntryIndex >= 0
+        val canEditArchiveResource = currentDoomPatch != null ||
+            currentResourceOriginalBytes?.let { PngOffsetChunk.isPng(it) } == true
+
+        when {
+            inArchive && canEditArchiveResource -> {
+                savePatchButton.text = "Guardar cambios en copia WAD/PK3"
+                savePatchButton.isEnabled = true
+            }
+            currentDoomPatch != null -> {
+                savePatchButton.text = "Guardar offsets como Doom Patch"
+                savePatchButton.isEnabled = true
+            }
+            else -> {
+                savePatchButton.text = "Guardar offsets como Doom Patch"
+                savePatchButton.isEnabled = false
+            }
+        }
+    }
+
+    private fun saveCurrentChanges() {
+        val archiveBytes = currentArchiveBytes
+        if (archiveBytes == null || currentArchiveEntryIndex < 0) {
+            saveDoomPatch()
+            return
+        }
+
+        try {
+            val originalResource = currentResourceOriginalBytes
+                ?: throw IllegalStateException("No se encontró el recurso original")
+
+            val updatedResource = when {
+                currentDoomPatch != null ->
+                    DoomPatchCodec.withOffsets(currentDoomPatch!!, offsetX, offsetY)
+                PngOffsetChunk.isPng(originalResource) ->
+                    PngOffsetChunk.withOffsets(originalResource, offsetX, offsetY)
+                else -> throw IllegalArgumentException(
+                    "Este formato de imagen todavía no permite guardar offsets dentro del archivo"
+                )
+            }
+
+            pendingPatchBytes = DoomArchiveWriter.replaceEntry(
+                archiveBytes,
+                currentArchiveEntryIndex,
+                updatedResource
+            )
+
+            val extension = if (currentArchiveFormat == "PK3") "pk3" else "wad"
+            val baseName = currentArchiveName.substringBeforeLast('.', currentArchiveName)
+                .ifBlank { "doom_archive" }
+            val mimeType = if (extension == "pk3") "application/zip" else "application/octet-stream"
+
+            val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = mimeType
+                putExtra(Intent.EXTRA_TITLE, baseName + "_edited." + extension)
+            }
+            startActivityForResult(intent, REQUEST_SAVE_ARCHIVE)
+        } catch (error: Exception) {
+            pendingPatchBytes = null
+            Toast.makeText(
+                this,
+                "No se pudo preparar la copia del archivo: " + error.message,
+                Toast.LENGTH_LONG
+            ).show()
         }
     }
 
@@ -731,28 +831,49 @@ private class SpritePreviewView(
     }
 
     private fun drawHud(canvas: Canvas, bitmap: Bitmap, zoom: Float) {
-        val scale = min(width * 0.88f / 320f, height * 0.82f / 200f) * zoom
+        val scale = min(
+            width * 0.88f / DoomHudLayout.SCREEN_WIDTH,
+            height * 0.82f / DoomHudLayout.SCREEN_HEIGHT
+        ) * zoom
         lastRenderScale = scale
-        val fw = 320f * scale
-        val fh = 200f * scale
-        val left = (width - fw) / 2f
-        val top = (height - fh) / 2f
-        val right = left + fw
-        val bottom = top + fh
-        canvas.drawRect(left, top, right, bottom, borderPaint)
-        val ax = left + 160f * scale
-        val ay = bottom
-        val spriteLeft = ax - offsetX * scale
-        val spriteTop = ay - offsetY * scale
+
+        val frameWidth = DoomHudLayout.SCREEN_WIDTH * scale
+        val frameHeight = DoomHudLayout.SCREEN_HEIGHT * scale
+        val frameLeft = (width - frameWidth) / 2f
+        val frameTop = (height - frameHeight) / 2f
+        val frameRight = frameLeft + frameWidth
+        val frameBottom = frameTop + frameHeight
+
+        // SLADE's HUD view uses Doom's 320x200 screen coordinate system:
+        // offsets are measured from the screen's top-left, not its bottom edge.
+        val spriteRect = DoomHudLayout.imageRect(
+            frameLeft = frameLeft,
+            frameTop = frameTop,
+            scale = scale,
+            imageWidth = bitmap.width,
+            imageHeight = bitmap.height,
+            offsetX = offsetX,
+            offsetY = offsetY
+        )
+
+        canvas.drawRect(frameLeft, frameTop, frameRight, frameBottom, borderPaint)
         canvas.save()
-        canvas.clipRect(left, top, right, bottom)
+        canvas.clipRect(frameLeft, frameTop, frameRight, frameBottom)
         canvas.drawBitmap(
-            bitmap, null,
-            RectF(spriteLeft, spriteTop, spriteLeft + bitmap.width * scale, spriteTop + bitmap.height * scale),
+            bitmap,
+            null,
+            RectF(spriteRect.left, spriteRect.top, spriteRect.right, spriteRect.bottom),
             bitmapPaint
         )
         canvas.restore()
-        drawCrosshair(canvas, ax, ay, true)
+
+        // Reference guides: screen center and the top of the status bar (y=168).
+        val centerX = DoomHudLayout.centerX(frameLeft, scale)
+        val statusBarY = DoomHudLayout.statusBarY(frameTop, scale)
+        canvas.drawLine(0f, statusBarY, width.toFloat(), statusBarY, linePaint)
+        canvas.drawLine(centerX, 0f, centerX, height.toFloat(), linePaint)
+        fillPaint.color = Color.rgb(255, 190, 70)
+        canvas.drawCircle(centerX, statusBarY, dp(3.5f), fillPaint)
     }
 
     private fun drawCrosshair(canvas: Canvas, x: Float, y: Float, marker: Boolean) {
