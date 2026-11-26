@@ -263,9 +263,6 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
         }
 
-        val decreaseOrUp: Button
-        val increaseOrDown: Button
-
         val leftButton = if (isX) {
             // Keep the requested X order: increase, value, decrease.
             makeButton("←").apply {
@@ -274,7 +271,12 @@ class MainActivity : Activity() {
                 minimumWidth = 0
                 minimumHeight = 0
             }.also { button ->
-                button.setOnClickListener { setOffset(true, offsetX + 1) }
+                button.setOnClickListener {
+                    setOffset(
+                        true,
+                        (offsetX.toLong() + 1L).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+                    )
+                }
             }
         } else {
             // Keep the requested Y order: decrease, value, increase.
@@ -284,7 +286,12 @@ class MainActivity : Activity() {
                 minimumWidth = 0
                 minimumHeight = 0
             }.also { button ->
-                button.setOnClickListener { setOffset(false, offsetY - 1) }
+                button.setOnClickListener {
+                    setOffset(
+                        false,
+                        (offsetY.toLong() - 1L).coerceAtLeast(Int.MIN_VALUE.toLong()).toInt()
+                    )
+                }
             }
         }
 
@@ -304,7 +311,12 @@ class MainActivity : Activity() {
                 minimumWidth = 0
                 minimumHeight = 0
             }.also { button ->
-                button.setOnClickListener { setOffset(true, offsetX - 1) }
+                button.setOnClickListener {
+                    setOffset(
+                        true,
+                        (offsetX.toLong() - 1L).coerceAtLeast(Int.MIN_VALUE.toLong()).toInt()
+                    )
+                }
             }
         } else {
             makeButton("↓").apply {
@@ -313,7 +325,12 @@ class MainActivity : Activity() {
                 minimumWidth = 0
                 minimumHeight = 0
             }.also { button ->
-                button.setOnClickListener { setOffset(false, offsetY + 1) }
+                button.setOnClickListener {
+                    setOffset(
+                        false,
+                        (offsetY.toLong() + 1L).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+                    )
+                }
             }
         }
 
