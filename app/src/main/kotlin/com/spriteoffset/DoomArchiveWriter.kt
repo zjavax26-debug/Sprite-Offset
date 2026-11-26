@@ -103,7 +103,7 @@ internal object DoomArchiveWriter {
         require(newDirectoryOffset + lumpCount * 16L <= MAX_OUTPUT_BYTES.toLong()) {
             "El WAD reconstruido superaría el límite de 256 MB"
         }
-        newDirectory.forEach(output::write)
+        newDirectory.forEach { output.write(it) }
 
         val result = output.toByteArray()
         require(newDirectoryOffset <= 0xFFFF_FFFFL) {
