@@ -831,28 +831,49 @@ private class SpritePreviewView(
     }
 
     private fun drawHud(canvas: Canvas, bitmap: Bitmap, zoom: Float) {
-        val scale = min(width * 0.88f / 320f, height * 0.82f / 200f) * zoom
+        val scale = min(
+            width * 0.88f / DoomHudLayout.SCREEN_WIDTH,
+            height * 0.82f / DoomHudLayout.SCREEN_HEIGHT
+        ) * zoom
         lastRenderScale = scale
-        val fw = 320f * scale
-        val fh = 200f * scale
-        val left = (width - fw) / 2f
-        val top = (height - fh) / 2f
-        val right = left + fw
-        val bottom = top + fh
-        canvas.drawRect(left, top, right, bottom, borderPaint)
-        val ax = left + 160f * scale
-        val ay = bottom
-        val spriteLeft = ax - offsetX * scale
-        val spriteTop = ay - offsetY * scale
+
+        val frameWidth = DoomHudLayout.SCREEN_WIDTH * scale
+        val frameHeight = DoomHudLayout.SCREEN_HEIGHT * scale
+        val frameLeft = (width - frameWidth) / 2f
+        val frameTop = (height - frameHeight) / 2f
+        val frameRight = frameLeft + frameWidth
+        val frameBottom = frameTop + frameHeight
+
+        // SLADE's HUD view uses Doom's 320x200 screen coordinate system:
+        // offsets are measured from the screen's top-left, not its bottom edge.
+        val spriteRect = DoomHudLayout.imageRect(
+            frameLeft = frameLeft,
+            frameTop = frameTop,
+            scale = scale,
+            imageWidth = bitmap.width,
+            imageHeight = bitmap.height,
+            offsetX = offsetX,
+            offsetY = offsetY
+        )
+
+        canvas.drawRect(frameLeft, frameTop, frameRight, frameBottom, borderPaint)
         canvas.save()
-        canvas.clipRect(left, top, right, bottom)
+        canvas.clipRect(frameLeft, frameTop, frameRight, frameBottom)
         canvas.drawBitmap(
-            bitmap, null,
-            RectF(spriteLeft, spriteTop, spriteLeft + bitmap.width * scale, spriteTop + bitmap.height * scale),
+            bitmap,
+            null,
+            RectF(spriteRect.left, spriteRect.top, spriteRect.right, spriteRect.bottom),
             bitmapPaint
         )
         canvas.restore()
-        drawCrosshair(canvas, ax, ay, true)
+
+        // Reference guides: screen center and the top of the status bar (y=168).
+        val centerX = DoomHudLayout.centerX(frameLeft, scale)
+        val statusBarY = DoomHudLayout.statusBarY(frameTop, scale)
+        canvas.drawLine(0f, statusBarY, width.toFloat(), statusBarY, linePaint)
+        canvas.drawLine(centerX, 0f, centerX, height.toFloat(), linePaint)
+        fillPaint.color = Color.rgb(255, 190, 70)
+        canvas.drawCircle(centerX, statusBarY, dp(3.5f), fillPaint)
     }
 
     private fun drawCrosshair(canvas: Canvas, x: Float, y: Float, marker: Boolean) {
