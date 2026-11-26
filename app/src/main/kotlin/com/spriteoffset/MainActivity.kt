@@ -580,7 +580,7 @@ class MainActivity : Activity() {
 
         val searchInput = EditText(this).apply {
             hint = "Buscar sprite..."
-            singleLine = true
+            setSingleLine(true)
             textSize = 16f
             inputType = InputType.TYPE_CLASS_TEXT
             setPadding(dp(10), 0, dp(10), 0)
