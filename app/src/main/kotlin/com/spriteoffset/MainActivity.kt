@@ -255,6 +255,7 @@ class MainActivity : Activity() {
     }
 
     private fun makeOffsetGroup(label: String, isX: Boolean): View {
+        // Directional controls keep the displayed axis and value order consistent.
         val group = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         group.addView(makeLabel(label))
 
