@@ -560,7 +560,17 @@ class MainActivity : Activity() {
                 Color.rgb(185, 198, 216)
             )
             scaleType = ImageView.ScaleType.CENTER
-            setBackgroundResource(android.R.drawable.btn_default_small)
+            val ripple = android.util.TypedValue()
+            if (context.theme.resolveAttribute(
+                    android.R.attr.selectableItemBackgroundBorderless,
+                    ripple,
+                    true
+                ) && ripple.resourceId != 0
+            ) {
+                setBackgroundResource(ripple.resourceId)
+            } else {
+                setBackgroundColor(Color.TRANSPARENT)
+            }
             minimumWidth = 0
             minimumHeight = 0
             setPadding(dp(8), dp(8), dp(8), dp(8))
@@ -584,7 +594,7 @@ class MainActivity : Activity() {
         })
 
         val spriteList = ListView(this).apply {
-            adapter = adapter
+            setAdapter(adapter)
             isFastScrollEnabled = true
             isFastScrollAlwaysVisible = true
             isScrollbarFadingEnabled = false
@@ -654,8 +664,12 @@ class MainActivity : Activity() {
         }
 
         val dialogHeight = min(
-            dp(620),
-            (resources.displayMetrics.heightPixels * 0.78f).toInt()
+            dp(560),
+            (resources.displayMetrics.heightPixels * 0.68f).toInt()
+        )
+        content.layoutParams = ViewGroup.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            dialogHeight
         )
         val dialog = AlertDialog.Builder(this)
             .setView(content)
