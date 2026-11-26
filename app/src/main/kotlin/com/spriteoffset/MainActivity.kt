@@ -257,10 +257,37 @@ class MainActivity : Activity() {
     private fun makeOffsetGroup(label: String, isX: Boolean): View {
         val group = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         group.addView(makeLabel(label))
+
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
+
+        val decreaseOrUp: Button
+        val increaseOrDown: Button
+
+        val leftButton = if (isX) {
+            // Keep the requested X order: increase, value, decrease.
+            makeButton("←").apply {
+                textSize = 19f
+                contentDescription = "Aumentar offset X"
+                minimumWidth = 0
+                minimumHeight = 0
+            }.also { button ->
+                button.setOnClickListener { setOffset(true, offsetX + 1) }
+            }
+        } else {
+            // Keep the requested Y order: decrease, value, increase.
+            makeButton("↑").apply {
+                textSize = 19f
+                contentDescription = "Disminuir offset Y"
+                minimumWidth = 0
+                minimumHeight = 0
+            }.also { button ->
+                button.setOnClickListener { setOffset(false, offsetY - 1) }
+            }
+        }
+
         val field = EditText(this).apply {
             inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_SIGNED
             setSingleLine(true)
@@ -269,20 +296,44 @@ class MainActivity : Activity() {
             setText(if (isX) offsetX.toString() else offsetY.toString())
         }
         if (isX) xInput = field else yInput = field
-        row.addView(field, LinearLayout.LayoutParams(0, dp(46), 1f))
-        val minus = makeButton("−").apply { textSize = 18f }
-        val plus = makeButton("+").apply { textSize = 18f }
-        row.addView(minus, LinearLayout.LayoutParams(dp(42), dp(42)))
-        row.addView(plus, LinearLayout.LayoutParams(dp(42), dp(42)).apply { marginStart = dp(4) })
-        minus.setOnClickListener { setOffset(isX, (if (isX) offsetX else offsetY) - 1) }
-        plus.setOnClickListener { setOffset(isX, (if (isX) offsetX else offsetY) + 1) }
+
+        val rightButton = if (isX) {
+            makeButton("→").apply {
+                textSize = 19f
+                contentDescription = "Disminuir offset X"
+                minimumWidth = 0
+                minimumHeight = 0
+            }.also { button ->
+                button.setOnClickListener { setOffset(true, offsetX - 1) }
+            }
+        } else {
+            makeButton("↓").apply {
+                textSize = 19f
+                contentDescription = "Aumentar offset Y"
+                minimumWidth = 0
+                minimumHeight = 0
+            }.also { button ->
+                button.setOnClickListener { setOffset(false, offsetY + 1) }
+            }
+        }
+
+        row.addView(leftButton, LinearLayout.LayoutParams(dp(42), dp(42)))
+        row.addView(field, LinearLayout.LayoutParams(0, dp(46), 1f).apply {
+            marginStart = dp(4)
+            marginEnd = dp(4)
+        })
+        row.addView(rightButton, LinearLayout.LayoutParams(dp(42), dp(42)))
+
         field.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                if (!updatingFields) setOffset(isX, s?.toString()?.toIntOrNull() ?: 0, false)
+                if (!updatingFields) {
+                    setOffset(isX, s?.toString()?.toIntOrNull() ?: 0, false)
+                }
             }
             override fun afterTextChanged(s: Editable?) = Unit
         })
+
         group.addView(row)
         return group
     }
