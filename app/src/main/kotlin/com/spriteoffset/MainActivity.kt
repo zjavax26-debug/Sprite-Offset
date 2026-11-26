@@ -107,7 +107,7 @@ class MainActivity : Activity() {
 
         archiveSpritesButton = ImageButton(this).apply {
             contentDescription = "Mostrar sprites reconocidos del WAD o PK3"
-            setImageResource(R.drawable.ic_archive_sprites)
+            setImageResource(android.R.drawable.ic_menu_agenda)
             scaleType = ImageView.ScaleType.CENTER
             background = openButton.background.constantState?.newDrawable()?.mutate()
                 ?: openButton.background
@@ -252,12 +252,6 @@ class MainActivity : Activity() {
         content.addView(exportButton, matchWrap())
         exportButton.setOnClickListener { exportPng() }
 
-        content.addView(TextView(this).apply {
-            text = "Carga un lump PLAYPAL extraído o un archivo IWAD/PWAD que lo contenga. Puedes elegir cualquiera de sus paletas; los espacios transparentes del Doom Patch se conservan. El guardado del Patch no altera sus píxeles comprimidos y el PNG exportado conserva los offsets grAb."
-            textSize = 12f
-            setTextColor(Color.rgb(155, 169, 190))
-            setPadding(0, dp(8), 0, 0)
-        })
     }
 
     private fun makeOffsetGroup(label: String, isX: Boolean): View {
@@ -416,7 +410,8 @@ class MainActivity : Activity() {
             return
         }
 
-        imageInfo.text = "$archiveName · ${contents.formatName} · ${contents.sprites.size} sprites reconocidos. Usa el botón de lista para verlos."
+        imageInfo.text = "$archiveName · ${contents.formatName} · ${contents.sprites.size} sprites reconocidos"
+        showArchiveSpritesDialog()
     }
 
     private fun updateArchiveSpritesButtonState() {
