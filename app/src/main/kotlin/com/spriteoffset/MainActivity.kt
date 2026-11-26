@@ -322,12 +322,12 @@ class MainActivity : Activity() {
             }
         }
 
-        row.addView(leftButton, LinearLayout.LayoutParams(dp(42), dp(42)))
+        row.addView(leftButton, LinearLayout.LayoutParams(dp(36), dp(42)))
         row.addView(field, LinearLayout.LayoutParams(0, dp(46), 1f).apply {
-            marginStart = dp(4)
-            marginEnd = dp(4)
+            marginStart = dp(2)
+            marginEnd = dp(2)
         })
-        row.addView(rightButton, LinearLayout.LayoutParams(dp(42), dp(42)))
+        row.addView(rightButton, LinearLayout.LayoutParams(dp(36), dp(42)))
 
         field.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
@@ -350,11 +350,25 @@ class MainActivity : Activity() {
         onClick: () -> Unit
     ): ImageButton {
         return ImageButton(this).apply {
-            setBackgroundResource(android.R.drawable.btn_default)
+            // Borderless Android ripple keeps the arrows visually secondary
+            // instead of using a raised square that competes with main actions.
+            val ripple = android.util.TypedValue()
+            if (context.theme.resolveAttribute(
+                    android.R.attr.selectableItemBackgroundBorderless,
+                    ripple,
+                    true
+                ) && ripple.resourceId != 0
+            ) {
+                setBackgroundResource(ripple.resourceId)
+            } else {
+                setBackgroundColor(Color.TRANSPARENT)
+            }
             setImageResource(drawableRes)
-            imageTintList = android.content.res.ColorStateList.valueOf(Color.WHITE)
+            imageTintList = android.content.res.ColorStateList.valueOf(
+                Color.rgb(174, 188, 207)
+            )
             scaleType = ImageView.ScaleType.CENTER_INSIDE
-            setPadding(dp(9), dp(9), dp(9), dp(9))
+            setPadding(dp(10), dp(10), dp(10), dp(10))
             this.rotation = rotation
             contentDescription = description
             minimumWidth = 0
@@ -499,7 +513,8 @@ class MainActivity : Activity() {
     private fun showArchiveSpritesDialog() {
         if (currentArchiveBytes == null || currentArchiveEntries.isEmpty()) return
 
-        val labels = currentArchiveEntries.map { entry ->
+        val entries = currentArchiveEntries
+        val labels = entries.map { entry ->
             val sizeLabel = if (entry.bytes.size >= 1024) {
                 String.format(
                     java.util.Locale.ROOT,
@@ -510,16 +525,158 @@ class MainActivity : Activity() {
                 "${entry.bytes.size} B"
             }
             "${entry.name}  ·  $sizeLabel"
-        }.toTypedArray()
+        }
 
-        AlertDialog.Builder(this)
-            .setTitle("Sprites de $currentArchiveName")
-            .setItems(labels) { _, which ->
-                val entry = currentArchiveEntries.getOrNull(which) ?: return@setItems
-                openResourceBytes(entry.bytes, entry.name, entry.entryIndex)
+        var filteredIndices = entries.indices.toList()
+        val adapter = ArrayAdapter(
+            this,
+            android.R.layout.simple_list_item_1,
+            filteredIndices.map { labels[it] }.toMutableList()
+        )
+
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(8), dp(4), dp(8), dp(2))
+        }
+
+        val titleRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val title = TextView(this).apply {
+            text = "Sprites de $currentArchiveName"
+            textSize = 18f
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setTextColor(Color.WHITE)
+            setPadding(dp(8), 0, dp(4), 0)
+        }
+        titleRow.addView(title, LinearLayout.LayoutParams(0, dp(48), 1f))
+
+        val searchButton = ImageButton(this).apply {
+            contentDescription = "Mostrar u ocultar búsqueda de sprites"
+            setImageResource(android.R.drawable.ic_menu_search)
+            imageTintList = android.content.res.ColorStateList.valueOf(
+                Color.rgb(185, 198, 216)
+            )
+            scaleType = ImageView.ScaleType.CENTER
+            setBackgroundResource(android.R.drawable.btn_default_small)
+            minimumWidth = 0
+            minimumHeight = 0
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+        }
+        titleRow.addView(searchButton, LinearLayout.LayoutParams(dp(44), dp(44)))
+        content.addView(titleRow)
+
+        val searchInput = EditText(this).apply {
+            hint = "Buscar sprite..."
+            singleLine = true
+            textSize = 16f
+            inputType = InputType.TYPE_CLASS_TEXT
+            setPadding(dp(10), 0, dp(10), 0)
+            visibility = View.GONE
+        }
+        content.addView(searchInput, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            dp(48)
+        ).apply {
+            bottomMargin = dp(4)
+        })
+
+        val spriteList = ListView(this).apply {
+            adapter = adapter
+            isFastScrollEnabled = true
+            isFastScrollAlwaysVisible = true
+            isScrollbarFadingEnabled = false
+            isVerticalScrollBarEnabled = true
+            scrollBarStyle = View.SCROLLBARS_INSIDE_INSET
+            divider = android.graphics.drawable.ColorDrawable(Color.rgb(63, 70, 82))
+            dividerHeight = dp(1)
+            choiceMode = ListView.CHOICE_MODE_SINGLE
+        }
+        content.addView(spriteList, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            0,
+            1f
+        ))
+
+        searchInput.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                val query = s?.toString()?.trim().orEmpty()
+                filteredIndices = if (query.isEmpty()) {
+                    entries.indices.toList()
+                } else {
+                    val prefixMatches = entries.indices.filter {
+                        entries[it].name.startsWith(query, ignoreCase = true)
+                    }
+                    val otherMatches = entries.indices.filter {
+                        !entries[it].name.startsWith(query, ignoreCase = true) &&
+                            entries[it].name.contains(query, ignoreCase = true)
+                    }
+                    prefixMatches + otherMatches
+                }
+
+                adapter.clear()
+                filteredIndices.forEach { adapter.add(labels[it]) }
+                adapter.notifyDataSetChanged()
+
+                // Matching rows move to the top immediately as the user types.
+                if (filteredIndices.isNotEmpty()) {
+                    spriteList.setSelection(0)
+                }
             }
+
+            override fun afterTextChanged(s: Editable?) = Unit
+        })
+
+        var searchVisible = false
+        searchButton.setOnClickListener {
+            searchVisible = !searchVisible
+            searchInput.visibility = if (searchVisible) View.VISIBLE else View.GONE
+            if (searchVisible) {
+                searchInput.requestFocus()
+                searchInput.post {
+                    val keyboard = getSystemService(INPUT_METHOD_SERVICE)
+                        as? android.view.inputmethod.InputMethodManager
+                    keyboard?.showSoftInput(
+                        searchInput,
+                        android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT
+                    )
+                }
+            } else {
+                searchInput.setText("")
+                val keyboard = getSystemService(INPUT_METHOD_SERVICE)
+                    as? android.view.inputmethod.InputMethodManager
+                keyboard?.hideSoftInputFromWindow(searchInput.windowToken, 0)
+            }
+        }
+
+        val dialogHeight = min(
+            dp(620),
+            (resources.displayMetrics.heightPixels * 0.78f).toInt()
+        )
+        val dialog = AlertDialog.Builder(this)
+            .setView(content)
             .setNegativeButton("Cancelar", null)
-            .show()
+            .create()
+
+        dialog.setOnShowListener {
+            dialog.window?.setLayout(
+                (resources.displayMetrics.widthPixels * 0.92f).toInt(),
+                dialogHeight
+            )
+        }
+
+        spriteList.setOnItemClickListener { _, _, position, _ ->
+            val originalIndex = filteredIndices.getOrNull(position) ?: return@setOnItemClickListener
+            val entry = entries.getOrNull(originalIndex) ?: return@setOnItemClickListener
+            dialog.dismiss()
+            openResourceBytes(entry.bytes, entry.name, entry.entryIndex)
+        }
+
+        dialog.show()
     }
 
     private fun openResourceBytes(
