@@ -39,6 +39,7 @@ class MainActivity : Activity() {
     private var pendingPatchBytes: ByteArray? = null
     private var pendingPngBitmap: Bitmap? = null
     private lateinit var savePatchButton: Button
+    private lateinit var archiveSpritesButton: ImageButton
     private lateinit var paletteSpinner: Spinner
     private lateinit var paletteInfo: TextView
     private var playpalPalettes: List<IntArray> = emptyList()
@@ -94,9 +95,36 @@ class MainActivity : Activity() {
             setPadding(0, dp(3), 0, dp(14))
         })
 
+        val openRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
         val openButton = makeButton("Abrir imagen o WAD/PK3")
-        content.addView(openButton, matchWrap())
+        openRow.addView(openButton, LinearLayout.LayoutParams(
+            0, dp(52), 1f
+        ))
         openButton.setOnClickListener { openImagePicker() }
+
+        archiveSpritesButton = ImageButton(this).apply {
+            contentDescription = "Mostrar sprites reconocidos del WAD o PK3"
+            setImageResource(R.drawable.ic_archive_sprites)
+            scaleType = ImageView.ScaleType.CENTER
+            background = openButton.background.constantState?.newDrawable()?.mutate()
+                ?: openButton.background
+            imageTintList = android.content.res.ColorStateList(
+                arrayOf(
+                    intArrayOf(android.R.attr.state_enabled),
+                    intArrayOf()
+                ),
+                intArrayOf(Color.WHITE, Color.rgb(125, 130, 140))
+            )
+            isEnabled = false
+        }
+        openRow.addView(archiveSpritesButton, LinearLayout.LayoutParams(
+            dp(52), dp(52)
+        ).apply { marginStart = dp(8) })
+        archiveSpritesButton.setOnClickListener { showArchiveSpritesDialog() }
+        content.addView(openRow, matchWrap())
 
         imageInfo = TextView(this).apply {
             text = "Ninguna imagen seleccionada"
@@ -376,17 +404,31 @@ class MainActivity : Activity() {
             updatePaletteInfo()
         }
 
+        updateArchiveSpritesButtonState()
+
         if (contents.sprites.isEmpty()) {
             imageInfo.text = "$archiveName · ${contents.formatName} · no se encontraron sprites gráficos"
             Toast.makeText(
                 this,
-                "No se encontraron sprites en el archivo",
+                "No se encontraron sprites reconocidos en el archivo",
                 Toast.LENGTH_LONG
             ).show()
             return
         }
 
-        val labels = contents.sprites.map { entry ->
+        imageInfo.text = "$archiveName · ${contents.formatName} · ${contents.sprites.size} sprites reconocidos. Usa el botón de lista para verlos."
+    }
+
+    private fun updateArchiveSpritesButtonState() {
+        if (!::archiveSpritesButton.isInitialized) return
+        archiveSpritesButton.isEnabled =
+            currentArchiveBytes != null && currentArchiveEntries.isNotEmpty()
+    }
+
+    private fun showArchiveSpritesDialog() {
+        if (currentArchiveBytes == null || currentArchiveEntries.isEmpty()) return
+
+        val labels = currentArchiveEntries.map { entry ->
             val sizeLabel = if (entry.bytes.size >= 1024) {
                 String.format(
                     java.util.Locale.ROOT,
@@ -400,7 +442,7 @@ class MainActivity : Activity() {
         }.toTypedArray()
 
         AlertDialog.Builder(this)
-            .setTitle("Sprites de $archiveName")
+            .setTitle("Sprites de $currentArchiveName")
             .setItems(labels) { _, which ->
                 val entry = currentArchiveEntries.getOrNull(which) ?: return@setItems
                 openResourceBytes(entry.bytes, entry.name, entry.entryIndex)
@@ -562,6 +604,7 @@ class MainActivity : Activity() {
         currentArchiveEntryIndex = -1
         currentResourceOriginalBytes = null
         updateSaveButtonState()
+        updateArchiveSpritesButtonState()
     }
 
     private fun updateSaveButtonState() {
