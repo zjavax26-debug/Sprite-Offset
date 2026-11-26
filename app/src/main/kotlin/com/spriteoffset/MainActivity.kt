@@ -107,7 +107,7 @@ class MainActivity : Activity() {
 
         archiveSpritesButton = ImageButton(this).apply {
             contentDescription = "Mostrar sprites reconocidos del WAD o PK3"
-            setImageResource(android.R.drawable.ic_menu_agenda)
+            setImageResource(R.drawable.ic_archive_sprites)
             scaleType = ImageView.ScaleType.CENTER
             background = openButton.background.constantState?.newDrawable()?.mutate()
                 ?: openButton.background
@@ -255,7 +255,6 @@ class MainActivity : Activity() {
     }
 
     private fun makeOffsetGroup(label: String, isX: Boolean): View {
-        // Directional controls keep the displayed axis and value order consistent.
         val group = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         group.addView(makeLabel(label))
 
@@ -264,35 +263,29 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
         }
 
+        // Use Android framework drawables instead of Unicode arrows.
+        // This avoids missing-glyph boxes on devices with limited font coverage.
         val leftButton = if (isX) {
-            // Keep the requested X order: increase, value, decrease.
-            makeButton("←").apply {
-                textSize = 19f
-                contentDescription = "Aumentar offset X"
-                minimumWidth = 0
-                minimumHeight = 0
-            }.also { button ->
-                button.setOnClickListener {
-                    setOffset(
-                        true,
-                        (offsetX.toLong() + 1L).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
-                    )
-                }
+            makeDirectionalButton(
+                drawableRes = android.R.drawable.arrow_up_float,
+                rotation = 270f,
+                description = "Aumentar offset X"
+            ) {
+                setOffset(
+                    true,
+                    (offsetX.toLong() + 1L).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+                )
             }
         } else {
-            // Keep the requested Y order: decrease, value, increase.
-            makeButton("↑").apply {
-                textSize = 19f
-                contentDescription = "Disminuir offset Y"
-                minimumWidth = 0
-                minimumHeight = 0
-            }.also { button ->
-                button.setOnClickListener {
-                    setOffset(
-                        false,
-                        (offsetY.toLong() - 1L).coerceAtLeast(Int.MIN_VALUE.toLong()).toInt()
-                    )
-                }
+            makeDirectionalButton(
+                drawableRes = android.R.drawable.arrow_up_float,
+                rotation = 0f,
+                description = "Disminuir offset Y"
+            ) {
+                setOffset(
+                    false,
+                    (offsetY.toLong() - 1L).coerceAtLeast(Int.MIN_VALUE.toLong()).toInt()
+                )
             }
         }
 
@@ -306,32 +299,26 @@ class MainActivity : Activity() {
         if (isX) xInput = field else yInput = field
 
         val rightButton = if (isX) {
-            makeButton("→").apply {
-                textSize = 19f
-                contentDescription = "Disminuir offset X"
-                minimumWidth = 0
-                minimumHeight = 0
-            }.also { button ->
-                button.setOnClickListener {
-                    setOffset(
-                        true,
-                        (offsetX.toLong() - 1L).coerceAtLeast(Int.MIN_VALUE.toLong()).toInt()
-                    )
-                }
+            makeDirectionalButton(
+                drawableRes = android.R.drawable.arrow_up_float,
+                rotation = 90f,
+                description = "Disminuir offset X"
+            ) {
+                setOffset(
+                    true,
+                    (offsetX.toLong() - 1L).coerceAtLeast(Int.MIN_VALUE.toLong()).toInt()
+                )
             }
         } else {
-            makeButton("↓").apply {
-                textSize = 19f
-                contentDescription = "Aumentar offset Y"
-                minimumWidth = 0
-                minimumHeight = 0
-            }.also { button ->
-                button.setOnClickListener {
-                    setOffset(
-                        false,
-                        (offsetY.toLong() + 1L).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
-                    )
-                }
+            makeDirectionalButton(
+                drawableRes = android.R.drawable.arrow_down_float,
+                rotation = 0f,
+                description = "Aumentar offset Y"
+            ) {
+                setOffset(
+                    false,
+                    (offsetY.toLong() + 1L).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+                )
             }
         }
 
@@ -354,6 +341,26 @@ class MainActivity : Activity() {
 
         group.addView(row)
         return group
+    }
+
+    private fun makeDirectionalButton(
+        drawableRes: Int,
+        rotation: Float,
+        description: String,
+        onClick: () -> Unit
+    ): ImageButton {
+        return ImageButton(this).apply {
+            setBackgroundResource(android.R.drawable.btn_default)
+            setImageResource(drawableRes)
+            imageTintList = android.content.res.ColorStateList.valueOf(Color.WHITE)
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            setPadding(dp(9), dp(9), dp(9), dp(9))
+            this.rotation = rotation
+            contentDescription = description
+            minimumWidth = 0
+            minimumHeight = 0
+            setOnClickListener { onClick() }
+        }
     }
 
     private fun setOffset(isX: Boolean, value: Int, updateField: Boolean = true) {
