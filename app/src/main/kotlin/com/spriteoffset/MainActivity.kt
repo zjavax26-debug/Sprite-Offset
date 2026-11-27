@@ -466,25 +466,85 @@ class MainActivity : Activity() {
         return BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
     }
 
-    private fun openSelectedDocument(uri: Uri) {
-        try {
-            val bytes = readDocument(uri)
-            val name = queryDisplayName(uri) ?: "Imagen"
-            if (DoomArchiveReader.isArchive(bytes)) {
-                openArchiveBytes(bytes, name)
-            } else {
-                clearArchiveContext()
-                openResourceBytes(bytes, name)
+    @Suppress("DEPRECATION")
+    private fun handleIncomingIntent(sourceIntent: Intent?) {
+        sourceIntent ?: return
+        val sharedUri = when (sourceIntent.action) {
+            Intent.ACTION_SEND -> {
+                val streamUri = sourceIntent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+                streamUri
+                    ?: sourceIntent.clipData?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.uri
+                    ?: sourceIntent.data
             }
-        } catch (error: Exception) {
-            Toast.makeText(this, "No se pudo abrir el archivo: " + error.message, Toast.LENGTH_LONG).show()
-        } catch (error: OutOfMemoryError) {
-            Toast.makeText(this, "El archivo es demasiado grande para este dispositivo", Toast.LENGTH_LONG).show()
+            Intent.ACTION_VIEW -> sourceIntent.data
+            else -> null
+        }
+        if (sharedUri != null) openSelectedDocument(sharedUri)
+    }
+
+    private fun openSelectedDocument(uri: Uri) {
+        val requestId = ++openRequestSequence
+        loadingDialog?.dismiss()
+        loadingDialog = AlertDialog.Builder(this)
+            .setMessage("Abriendo y comprobando archivo…")
+            .setCancelable(false)
+            .create()
+            .also { it.show() }
+
+        fileOpenExecutor.execute {
+            try {
+                val bytes = readDocument(uri)
+                val name = queryDisplayName(uri) ?: "Imagen"
+                val archiveContents = if (DoomArchiveReader.isArchive(bytes)) {
+                    DoomArchiveReader.read(bytes)
+                } else {
+                    null
+                }
+
+                mainHandler.post {
+                    if (requestId != openRequestSequence || isFinishing || isDestroyed) return@post
+                    loadingDialog?.dismiss()
+                    loadingDialog = null
+
+                    if (archiveContents != null) {
+                        openArchiveBytes(bytes, name, archiveContents)
+                    } else {
+                        clearArchiveContext()
+                        openResourceBytes(bytes, name)
+                    }
+                }
+            } catch (error: Exception) {
+                val message = error.message ?: "Formato no compatible"
+                mainHandler.post {
+                    if (requestId != openRequestSequence || isFinishing || isDestroyed) return@post
+                    loadingDialog?.dismiss()
+                    loadingDialog = null
+                    Toast.makeText(
+                        this,
+                        "No se pudo abrir el archivo: $message",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            } catch (error: OutOfMemoryError) {
+                mainHandler.post {
+                    if (requestId != openRequestSequence || isFinishing || isDestroyed) return@post
+                    loadingDialog?.dismiss()
+                    loadingDialog = null
+                    Toast.makeText(
+                        this,
+                        "Memoria insuficiente. Límites: 64 MB por archivo, 4000 entradas ZIP/PK3, 5000 lumps WAD y 1500 sprites.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
         }
     }
 
-    private fun openArchiveBytes(bytes: ByteArray, archiveName: String) {
-        val contents = DoomArchiveReader.read(bytes)
+    private fun openArchiveBytes(
+        bytes: ByteArray,
+        archiveName: String,
+        contents: DoomArchiveContents
+    ) {
         currentArchiveName = archiveName
         currentArchiveEntries = contents.sprites
         currentArchiveBytes = bytes
