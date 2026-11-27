@@ -3,6 +3,8 @@ package com.spriteoffset
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
+import android.os.Handler
+import android.os.Looper
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -24,6 +26,7 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 import java.io.ByteArrayOutputStream
+import java.util.concurrent.Executors
 
 class MainActivity : Activity() {
     private lateinit var preview: SpritePreviewView
@@ -36,7 +39,7 @@ class MainActivity : Activity() {
     private var currentBitmap: Bitmap? = null
     private var currentDoomPatch: ByteArray? = null
     private var currentDisplayName = "sprite"
-    private var pendingPatchBytes: ByteArray? = null
+    private var pendingArchiveBytes: ByteArray? = null
     private var pendingPngBitmap: Bitmap? = null
     private lateinit var savePatchButton: Button
     private lateinit var archiveSpritesButton: ImageButton
@@ -58,11 +61,15 @@ class MainActivity : Activity() {
     private var currentArchiveFormat: String? = null
     private var currentArchiveEntryIndex = -1
     private var currentResourceOriginalBytes: ByteArray? = null
+    private var currentResourceIsPng = false
+    private val fileOpenExecutor = Executors.newSingleThreadExecutor()
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var openRequestSequence = 0
+    private var loadingDialog: AlertDialog? = null
 
     companion object {
         private const val REQUEST_IMAGE = 41
-        private const val REQUEST_SAVE_PATCH = 42
-        private const val REQUEST_EXPORT_PNG = 43
+                private const val REQUEST_EXPORT_PNG = 43
         private const val REQUEST_PLAYPAL = 44
         private const val REQUEST_SAVE_ARCHIVE = 45
         private const val MAX_OFFSET = Int.MAX_VALUE
@@ -234,15 +241,30 @@ class MainActivity : Activity() {
         content.addView(zoomRow)
 
         content.addView(sectionLabel("Guardar y exportar"))
-        savePatchButton = makeButton("Guardar offsets como Doom Patch")
+        savePatchButton = makeButton("Guardar cambios en copia WAD/PK3")
+        savePatchButton.visibility = View.GONE
         savePatchButton.isEnabled = false
         content.addView(savePatchButton, matchWrap())
         savePatchButton.setOnClickListener { saveCurrentChanges() }
 
-        val exportButton = makeButton("Exportar vista a PNG")
+        val exportButton = makeButton("Exportar a PNG")
         content.addView(exportButton, matchWrap())
         exportButton.setOnClickListener { exportPng() }
 
+        handleIncomingIntent(intent)
+    }
+
+    @Deprecated("Share intents are routed here for Android 8 compatibility")
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIncomingIntent(intent)
+    }
+
+    override fun onDestroy() {
+        loadingDialog?.dismiss()
+        fileOpenExecutor.shutdownNow()
+        super.onDestroy()
     }
 
     private fun makeOffsetGroup(label: String, isX: Boolean): View {
