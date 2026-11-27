@@ -78,6 +78,28 @@ class DoomArchiveWriterTest {
         assertArrayEquals(byteArrayOf(7, 7, 7), entries["textures/WALL.png"])
     }
 
+    @Test
+    fun convertsPk3LumpFilenameToPngWhenReplacingWithPngPayload() {
+        val originalPatch = byteArrayOf(1, 2, 3, 4)
+        val pngPayload = byteArrayOf(9, 8, 7, 6, 5)
+        val original = makeZip(
+            "README.txt" to "unchanged".toByteArray(),
+            "sprites/TROOA1.lmp" to originalPatch
+        )
+
+        val contents = DoomArchiveReader.read(original)
+        val updated = DoomArchiveWriter.replaceEntry(
+            originalArchive = original,
+            entryIndex = contents.sprites.single().entryIndex,
+            replacementBytes = pngPayload,
+            replacementEntryName = "sprites/TROOA1.png"
+        )
+        val result = DoomArchiveReader.read(updated)
+
+        assertEquals("sprites/TROOA1.png", result.sprites.single().name)
+        assertArrayEquals(pngPayload, result.sprites.single().bytes)
+    }
+
     private data class WadLump(val name: String, val bytes: ByteArray)
 
     private fun makeWad(lumps: List<WadLump>): ByteArray {
