@@ -3,6 +3,7 @@ package com.spriteoffset
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.ByteArrayOutputStream
 import java.nio.charset.Charset
@@ -48,6 +49,45 @@ class DoomArchiveReaderTest {
         assertEquals("sprites/TROOA1.png", result.sprites[0].name)
         assertArrayEquals(byteArrayOf(9, 8, 7), result.sprites[0].bytes)
         assertArrayEquals(palette, result.playpalBytes)
+    }
+
+    @Test
+    fun rejectsPk3WithMoreThanFourThousandEntries() {
+        val output = ByteArrayOutputStream()
+        ZipOutputStream(output).use { zip ->
+            repeat(4001) { index ->
+                zip.putNextEntry(ZipEntry("misc/file_$index.txt"))
+                zip.write(byteArrayOf(1))
+                zip.closeEntry()
+            }
+        }
+
+        try {
+            DoomArchiveReader.read(output.toByteArray())
+            throw AssertionError("Expected the PK3 entry-count limit to reject this archive")
+        } catch (error: IllegalArgumentException) {
+            assertTrue(error.message.orEmpty().contains("4000"))
+        }
+    }
+
+    @Test
+    fun rejectsWadWithMoreThanFifteenHundredSprites() {
+        val lumps = ArrayList<WadLump>()
+        lumps.add(WadLump("S_START", ByteArray(0)))
+        repeat(1501) {
+            // Duplicated names are valid for this reader-limit test; the archive
+            // namespace contains more compatible image entries than allowed.
+            lumps.add(WadLump("TROOA1", byteArrayOf(1)))
+        }
+        lumps.add(WadLump("S_END", ByteArray(0)))
+        val wad = makeWad(lumps)
+
+        try {
+            DoomArchiveReader.read(wad)
+            throw AssertionError("Expected the sprite-count limit to reject this WAD")
+        } catch (error: IllegalArgumentException) {
+            assertTrue(error.message.orEmpty().contains("1500"))
+        }
     }
 
     private data class WadLump(val name: String, val bytes: ByteArray)

@@ -31,10 +31,12 @@ internal data class DoomArchiveContents(
 internal object DoomArchiveReader {
     private val ASCII = Charset.forName("US-ASCII")
 
-    private const val MAX_WAD_LUMPS = 1_000_000L
-    private const val MAX_ZIP_ENTRIES = 50_000
-    private const val MAX_RESOURCE_BYTES = 32 * 1024 * 1024
-    private const val MAX_SELECTED_BYTES = 128L * 1024L * 1024L
+    // Conservative limits intended to keep archive scans responsive on older phones.
+    private const val MAX_WAD_LUMPS = 5_000L
+    private const val MAX_ZIP_ENTRIES = 4_000
+    private const val MAX_SPRITE_ENTRIES = 1_500
+    private const val MAX_RESOURCE_BYTES = 16 * 1024 * 1024
+    private const val MAX_SELECTED_BYTES = 64L * 1024L * 1024L
 
     private val imageExtensions = setOf(
         ".png", ".bmp", ".jpg", ".jpeg", ".gif", ".webp"
@@ -76,7 +78,7 @@ internal object DoomArchiveReader {
         val lumpCount = readU32LE(wad, 4)
         val directoryOffset = readU32LE(wad, 8)
         require(lumpCount >= 1L && lumpCount <= MAX_WAD_LUMPS) {
-            "Número de lumps WAD no válido"
+            "Este WAD contiene más de 5000 lumps. El límite de Sprite Offset es 5000."
         }
 
         val directoryEnd = directoryOffset + lumpCount * 16L
@@ -140,6 +142,19 @@ internal object DoomArchiveReader {
             allLumps.filter { looksLikeSpriteName(it.name) }
         }
 
+        require(selected.size <= MAX_SPRITE_ENTRIES) {
+            "Este WAD contiene más de 1500 sprites compatibles. El límite actual es 1500 para evitar bloqueos."
+        }
+        selected.forEach { lump ->
+            require(lump.size <= MAX_RESOURCE_BYTES) {
+                "Un sprite supera el límite de 16 MB por recurso."
+            }
+        }
+        val selectedByteCount = selected.sumOf { it.size.toLong() }
+        require(selectedByteCount <= MAX_SELECTED_BYTES) {
+            "Los sprites del WAD superan el límite combinado de 64 MB."
+        }
+
         val sprites = selected.map { lump ->
             DoomArchiveSprite(
                 name = lump.name,
@@ -156,6 +171,7 @@ internal object DoomArchiveReader {
         var playpal: ByteArray? = null
         var entryCount = 0
         var selectedBytes = 0L
+        var otherGraphicsOverflow = false
 
         ZipInputStream(ByteArrayInputStream(zipBytes)).use { input ->
             while (true) {
@@ -163,7 +179,7 @@ internal object DoomArchiveReader {
                 val currentEntryIndex = entryCount
                 entryCount++
                 require(entryCount <= MAX_ZIP_ENTRIES) {
-                    "El PK3 contiene demasiados archivos"
+                    "Este ZIP/PK3 contiene más de 4000 archivos. El límite de Sprite Offset es 4000."
                 }
 
                 if (entry.isDirectory) {
@@ -185,34 +201,62 @@ internal object DoomArchiveReader {
                     !it.contains('.')
                 }
                 val isExtensionlessSprite = isSpritePath && hasNoExtension
-                val shouldRead = isPlaypal || isImageFile || isPatchFile || isExtensionlessSprite
+                val isCandidateImage = isImageFile || isPatchFile || isExtensionlessSprite
+
+                val shouldRead = isPlaypal ||
+                    (isSpritePath && isCandidateImage) ||
+                    (!isSpritePath && isCandidateImage &&
+                        otherGraphicsEntries.size < MAX_SPRITE_ENTRIES)
 
                 if (shouldRead) {
-                    val data = readZipEntryLimited(input, MAX_RESOURCE_BYTES)
+                    val resourceLimit = if (isPlaypal) {
+                        2 * 1024 * 1024
+                    } else {
+                        MAX_RESOURCE_BYTES
+                    }
+                    val data = readZipEntryLimited(input, resourceLimit)
                     selectedBytes += data.size.toLong()
                     require(selectedBytes <= MAX_SELECTED_BYTES) {
-                        "Los recursos gráficos del PK3 superan el límite de memoria"
+                        "Los recursos gráficos del ZIP/PK3 superan el límite combinado de 64 MB."
                     }
 
                     if (isPlaypal) {
                         playpal = data
                     } else if (isSpritePath) {
-                        spritesFolderEntries.add(DoomArchiveSprite(normalizedName, data, currentEntryIndex))
-                    } else if (isImageFile || isPatchFile) {
-                        otherGraphicsEntries.add(DoomArchiveSprite(normalizedName, data, currentEntryIndex))
+                        require(spritesFolderEntries.size < MAX_SPRITE_ENTRIES) {
+                            "Este PK3 contiene más de 1500 recursos en sprites/. El límite actual es 1500."
+                        }
+                        spritesFolderEntries.add(
+                            DoomArchiveSprite(normalizedName, data, currentEntryIndex)
+                        )
+                    } else if (isCandidateImage) {
+                        otherGraphicsEntries.add(
+                            DoomArchiveSprite(normalizedName, data, currentEntryIndex)
+                        )
                     }
+                } else if (!isSpritePath && isCandidateImage) {
+                    // Keep scanning for a later sprites/ folder, but don't retain
+                    // an unbounded fallback list in memory.
+                    otherGraphicsOverflow = true
                 }
 
                 input.closeEntry()
             }
         }
 
-        // Prefer the explicit sprites/ folder when present so texture and UI
-        // graphics elsewhere in the PK3 do not flood the sprite picker.
+        // Prefer the explicit sprites/ folder. Only use general image files when
+        // no sprites folder exists; this avoids listing unrelated textures.
         val selectedSprites = if (spritesFolderEntries.isNotEmpty()) {
             spritesFolderEntries
         } else {
+            require(!otherGraphicsOverflow) {
+                "Este ZIP/PK3 contiene más de 1500 imágenes compatibles fuera de sprites/. El límite actual es 1500."
+            }
             otherGraphicsEntries
+        }
+
+        require(selectedSprites.size <= MAX_SPRITE_ENTRIES) {
+            "Este ZIP/PK3 contiene más de 1500 sprites compatibles. El límite actual es 1500."
         }
         return DoomArchiveContents(selectedSprites, playpal, "PK3")
     }
@@ -227,7 +271,7 @@ internal object DoomArchiveReader {
             if (count < 0) break
             total += count
             require(total <= limit) {
-                "Un recurso del PK3 supera el límite de 32 MB"
+                "Un recurso del ZIP/PK3 supera el límite de ${limit / (1024 * 1024)} MB."
             }
             output.write(buffer, 0, count)
         }

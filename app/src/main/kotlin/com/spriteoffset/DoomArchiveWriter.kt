@@ -16,14 +16,15 @@ import java.util.zip.ZipOutputStream
  */
 internal object DoomArchiveWriter {
     private const val MAX_OUTPUT_BYTES = 256 * 1024 * 1024
-    private const val MAX_WAD_LUMPS = 1_000_000L
-    private const val MAX_ZIP_ENTRIES = 50_000
+    private const val MAX_WAD_LUMPS = 5_000L
+    private const val MAX_ZIP_ENTRIES = 4_000
     private const val BUFFER_SIZE = 16 * 1024
 
     fun replaceEntry(
         originalArchive: ByteArray,
         entryIndex: Int,
-        replacementBytes: ByteArray
+        replacementBytes: ByteArray,
+        replacementEntryName: String? = null
     ): ByteArray {
         require(entryIndex >= 0) { "Índice de recurso no válido" }
         require(replacementBytes.size <= MAX_OUTPUT_BYTES) {
@@ -34,7 +35,12 @@ internal object DoomArchiveWriter {
             DoomArchiveReader.isWad(originalArchive) ->
                 replaceWadEntry(originalArchive, entryIndex, replacementBytes)
             DoomArchiveReader.isZip(originalArchive) ->
-                replaceZipEntry(originalArchive, entryIndex, replacementBytes)
+                replaceZipEntry(
+                    originalArchive,
+                    entryIndex,
+                    replacementBytes,
+                    replacementEntryName
+                )
             else -> throw IllegalArgumentException("El archivo no es un WAD ni un PK3 válido")
         }
     }
@@ -116,8 +122,17 @@ internal object DoomArchiveWriter {
     private fun replaceZipEntry(
         original: ByteArray,
         targetIndex: Int,
-        replacement: ByteArray
+        replacement: ByteArray,
+        replacementEntryName: String?
     ): ByteArray {
+        val originalNames = readZipEntryNames(original)
+        require(targetIndex in originalNames.indices) {
+            "El recurso seleccionado ya no existe en el PK3"
+        }
+        val outputEntryName = replacementEntryName?.let {
+            uniqueReplacementName(it, originalNames, targetIndex)
+        } ?: originalNames[targetIndex]
+
         val output = ByteArrayOutputStream(original.size + 1024)
         var entryIndex = 0
         var foundTarget = false
@@ -132,7 +147,12 @@ internal object DoomArchiveWriter {
                     }
 
                     val thisIndex = entryIndex++
-                    val outputEntry = ZipEntry(sourceEntry.name).apply {
+                    val entryName = if (thisIndex == targetIndex) {
+                        outputEntryName
+                    } else {
+                        sourceEntry.name
+                    }
+                    val outputEntry = ZipEntry(entryName).apply {
                         if (sourceEntry.time >= 0L) time = sourceEntry.time
                         sourceEntry.comment?.let { comment = it }
                         // Rebuild all entries with DEFLATED compression so the
@@ -170,6 +190,47 @@ internal object DoomArchiveWriter {
             "El PK3 reconstruido superaría el límite de 256 MB"
         }
         return output.toByteArray()
+    }
+
+    private fun readZipEntryNames(original: ByteArray): List<String> {
+        val names = ArrayList<String>()
+        ZipInputStream(ByteArrayInputStream(original)).use { input ->
+            while (true) {
+                val entry = input.nextEntry ?: break
+                names.add(entry.name)
+                input.closeEntry()
+                require(names.size <= MAX_ZIP_ENTRIES) {
+                    "Este PK3 contiene más de 4000 archivos; no se puede reconstruir con seguridad."
+                }
+            }
+        }
+        return names
+    }
+
+    private fun uniqueReplacementName(
+        requestedName: String,
+        originalNames: List<String>,
+        targetIndex: Int
+    ): String {
+        val existing = originalNames.mapIndexedNotNull { index, name ->
+            if (index == targetIndex) null else name.lowercase()
+        }.toHashSet()
+        if (requestedName.lowercase() !in existing) return requestedName
+
+        val slash = requestedName.lastIndexOf('/')
+        val directory = if (slash >= 0) requestedName.substring(0, slash + 1) else ""
+        val filename = requestedName.substring(slash + 1)
+        val dot = filename.lastIndexOf('.')
+        val stem = if (dot > 0) filename.substring(0, dot) else filename
+
+        var suffix = 1
+        while (suffix <= 10_000) {
+            val marker = if (suffix == 1) "_converted" else "_converted_$suffix"
+            val candidate = directory + stem + marker + ".png"
+            if (candidate.lowercase() !in existing) return candidate
+            suffix++
+        }
+        throw IllegalArgumentException("No se pudo crear un nombre PNG único dentro del PK3")
     }
 
     private fun copyEntry(input: ZipInputStream, output: ZipOutputStream): Long {
