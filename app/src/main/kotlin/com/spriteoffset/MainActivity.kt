@@ -434,8 +434,7 @@ class MainActivity : Activity() {
         when (requestCode) {
             REQUEST_IMAGE -> openSelectedDocument(uri)
             REQUEST_PLAYPAL -> openPlaypalDocument(uri)
-            REQUEST_SAVE_PATCH -> writePendingBytes(uri, pendingPatchBytes, "Doom Patch")
-            REQUEST_SAVE_ARCHIVE -> writePendingBytes(uri, pendingPatchBytes, "Copia del archivo")
+            REQUEST_SAVE_ARCHIVE -> writePendingBytes(uri, pendingArchiveBytes, "Copia WAD/PK3")
             REQUEST_EXPORT_PNG -> writePendingPng(uri)
         }
     }
@@ -551,6 +550,8 @@ class MainActivity : Activity() {
         currentArchiveFormat = contents.formatName
         currentArchiveEntryIndex = -1
         currentResourceOriginalBytes = null
+        currentResourceIsPng = false
+        updatePaletteDialogButtonState()
         currentDoomPatch = null
         currentBitmap = null
         preview.image = null
@@ -780,6 +781,8 @@ class MainActivity : Activity() {
     ) {
         currentArchiveEntryIndex = archiveEntryIndex
         currentResourceOriginalBytes = if (archiveEntryIndex >= 0) bytes else null
+        currentResourceIsPng = PngOffsetChunk.isPng(bytes)
+        updatePaletteDialogButtonState()
         val raster = decodeRaster(bytes)
         currentDisplayName = resourceName.substringAfterLast('/')
             .substringBeforeLast('.', resourceName)
@@ -798,7 +801,6 @@ class MainActivity : Activity() {
             }
             imageInfo.text = resourceName + " · " +
                 raster.width + " × " + raster.height + " px · " + formatLabel
-            savePatchButton.isEnabled = false
             preview.image = raster
             setOffset(true, offsetX)
             setOffset(false, offsetY)
@@ -1089,6 +1091,8 @@ class MainActivity : Activity() {
         currentArchiveFormat = null
         currentArchiveEntryIndex = -1
         currentResourceOriginalBytes = null
+        currentResourceIsPng = false
+        updatePaletteDialogButtonState()
         hasOriginalOffsets = false
         updateResetPositionButtonState()
         updateSaveButtonState()
@@ -1098,24 +1102,21 @@ class MainActivity : Activity() {
     private fun updateSaveButtonState() {
         if (!::savePatchButton.isInitialized) return
 
-        val inArchive = currentArchiveBytes != null && currentArchiveEntryIndex >= 0
-        val canEditArchiveResource = currentDoomPatch != null ||
-            currentResourceOriginalBytes?.let { PngOffsetChunk.isPng(it) } == true
+        val canSaveArchiveResource =
+            currentArchiveBytes != null &&
+                currentArchiveEntryIndex >= 0 &&
+                currentResourceOriginalBytes != null &&
+                currentBitmap != null
 
-        when {
-            inArchive && canEditArchiveResource -> {
-                savePatchButton.text = "Guardar cambios en copia WAD/PK3"
-                savePatchButton.isEnabled = true
-            }
-            currentDoomPatch != null -> {
-                savePatchButton.text = "Guardar offsets como Doom Patch"
-                savePatchButton.isEnabled = true
-            }
-            else -> {
-                savePatchButton.text = "Guardar offsets como Doom Patch"
-                savePatchButton.isEnabled = false
-            }
-        }
+        savePatchButton.visibility = if (canSaveArchiveResource) View.VISIBLE else View.GONE
+        savePatchButton.text = "Guardar cambios en copia WAD/PK3"
+        savePatchButton.isEnabled = canSaveArchiveResource
+    }
+
+    private fun updatePaletteDialogButtonState() {
+        if (!::paletteDialogButton.isInitialized) return
+        paletteDialogButton.isEnabled = !currentResourceIsPng
+        paletteDialogButton.alpha = if (currentResourceIsPng) 0.38f else 1f
     }
 
     private fun saveCurrentChanges() {
@@ -1139,7 +1140,7 @@ class MainActivity : Activity() {
                 )
             }
 
-            pendingPatchBytes = DoomArchiveWriter.replaceEntry(
+            pendingArchiveBytes = DoomArchiveWriter.replaceEntry(
                 archiveBytes,
                 currentArchiveEntryIndex,
                 updatedResource
@@ -1157,7 +1158,7 @@ class MainActivity : Activity() {
             }
             startActivityForResult(intent, REQUEST_SAVE_ARCHIVE)
         } catch (error: Exception) {
-            pendingPatchBytes = null
+            pendingArchiveBytes = null
             Toast.makeText(
                 this,
                 "No se pudo preparar la copia del archivo: " + error.message,
@@ -1169,7 +1170,7 @@ class MainActivity : Activity() {
     private fun saveDoomPatch() {
         val original = currentDoomPatch ?: return
         try {
-            pendingPatchBytes = DoomPatchCodec.withOffsets(original, offsetX, offsetY)
+            pendingArchiveBytes = DoomPatchCodec.withOffsets(original, offsetX, offsetY)
             val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
                 addCategory(Intent.CATEGORY_OPENABLE)
                 type = "application/octet-stream"
@@ -1205,7 +1206,7 @@ class MainActivity : Activity() {
         } catch (error: Exception) {
             Toast.makeText(this, "Error al guardar: " + error.message, Toast.LENGTH_LONG).show()
         } finally {
-            pendingPatchBytes = null
+            pendingArchiveBytes = null
         }
     }
 
