@@ -40,8 +40,13 @@ class MainActivity : Activity() {
     private var pendingPngBitmap: Bitmap? = null
     private lateinit var savePatchButton: Button
     private lateinit var archiveSpritesButton: ImageButton
+    private lateinit var resetPositionButton: ImageButton
+    private lateinit var paletteDialogButton: ImageButton
     private lateinit var paletteSpinner: Spinner
     private lateinit var paletteInfo: TextView
+    private var originalOffsetX = 0
+    private var originalOffsetY = 0
+    private var hasOriginalOffsets = false
     private var playpalPalettes: List<IntArray> = emptyList()
     private var selectedPaletteIndex = -1
     private var playpalSourceName = "PLAYPAL"
@@ -134,45 +139,6 @@ class MainActivity : Activity() {
         }
         content.addView(imageInfo)
 
-        content.addView(sectionLabel("Paleta de colores"))
-        val paletteRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        val openPaletteButton = makeButton("Abrir PLAYPAL")
-        paletteRow.addView(openPaletteButton, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT, dp(48)
-        ))
-        openPaletteButton.setOnClickListener { openPlaypalPicker() }
-
-        paletteSpinner = Spinner(this)
-        paletteSpinner.adapter = paletteAdapter(listOf("Escala de grises"))
-        paletteRow.addView(paletteSpinner, LinearLayout.LayoutParams(0, dp(48), 1f).apply {
-            marginStart = dp(8)
-        })
-        content.addView(paletteRow)
-
-        paletteInfo = TextView(this).apply {
-            text = "Sin PLAYPAL cargado · vista en escala de grises"
-            textSize = 12f
-            setTextColor(Color.rgb(155, 169, 190))
-            setPadding(0, dp(2), 0, dp(8))
-        }
-        content.addView(paletteInfo)
-
-        paletteSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                if (updatingPaletteSpinner) return
-                val nextIndex = if (position == 0) -1 else position - 1
-                if (nextIndex != selectedPaletteIndex) {
-                    selectedPaletteIndex = nextIndex
-                    updatePaletteInfo()
-                    if (currentDoomPatch != null) renderCurrentDoomPatch(resetOffsets = false)
-                }
-            }
-        }
-
         val modeRow = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
             orientation = LinearLayout.HORIZONTAL
@@ -184,6 +150,31 @@ class MainActivity : Activity() {
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         spinner.adapter = adapter
         modeRow.addView(spinner, LinearLayout.LayoutParams(0, dp(48), 1f))
+
+        resetPositionButton = makeToolbarIconButton(
+            backgroundSource = openButton,
+            description = "Restablecer posición y offsets originales"
+        ).apply {
+            setImageResource(android.R.drawable.ic_menu_mylocation)
+            imageTintList = android.content.res.ColorStateList.valueOf(Color.WHITE)
+            isEnabled = false
+        }
+        modeRow.addView(resetPositionButton, LinearLayout.LayoutParams(dp(46), dp(46)).apply {
+            marginStart = dp(4)
+        })
+        resetPositionButton.setOnClickListener { resetImagePosition() }
+
+        paletteDialogButton = makeToolbarIconButton(
+            backgroundSource = openButton,
+            description = "Abrir opciones de paleta de colores"
+        ).apply {
+            setImageDrawable(createPaletteGridDrawable())
+        }
+        modeRow.addView(paletteDialogButton, LinearLayout.LayoutParams(dp(46), dp(46)).apply {
+            marginStart = dp(6)
+        })
+        paletteDialogButton.setOnClickListener { showPaletteDialog() }
+
         content.addView(modeRow)
 
         preview = SpritePreviewView(this, scroll).apply {
@@ -481,6 +472,8 @@ class MainActivity : Activity() {
         currentDoomPatch = null
         currentBitmap = null
         preview.image = null
+        hasOriginalOffsets = false
+        updateResetPositionButtonState()
         updateSaveButtonState()
 
         if (contents.playpalBytes != null) {
@@ -728,6 +721,7 @@ class MainActivity : Activity() {
             setOffset(true, offsetX)
             setOffset(false, offsetY)
             syncOffsetFields()
+            rememberOriginalOffsets()
             updateSaveButtonState()
         } else {
             currentDoomPatch = bytes
@@ -778,6 +772,172 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun rememberOriginalOffsets() {
+        originalOffsetX = offsetX
+        originalOffsetY = offsetY
+        hasOriginalOffsets = true
+        updateResetPositionButtonState()
+    }
+
+    private fun updateResetPositionButtonState() {
+        if (!::resetPositionButton.isInitialized) return
+        resetPositionButton.isEnabled = currentBitmap != null && hasOriginalOffsets
+    }
+
+    private fun resetImagePosition() {
+        if (currentBitmap == null || !hasOriginalOffsets) return
+        offsetX = originalOffsetX
+        offsetY = originalOffsetY
+        preview.offsetX = originalOffsetX
+        preview.offsetY = originalOffsetY
+        syncOffsetFields()
+    }
+
+    private fun makeToolbarIconButton(
+        backgroundSource: Button,
+        description: String
+    ): ImageButton {
+        return ImageButton(this).apply {
+            contentDescription = description
+            scaleType = ImageView.ScaleType.CENTER
+            background = backgroundSource.background.constantState?.newDrawable()?.mutate()
+                ?: backgroundSource.background
+            imageTintList = android.content.res.ColorStateList.valueOf(Color.WHITE)
+            minimumWidth = 0
+            minimumHeight = 0
+            setPadding(dp(9), dp(9), dp(9), dp(9))
+        }
+    }
+
+    private fun createPaletteGridDrawable(): android.graphics.drawable.Drawable {
+        return object : android.graphics.drawable.Drawable() {
+            private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+            private val colors = intArrayOf(
+                Color.rgb(112, 45, 150), Color.rgb(27, 135, 75), Color.rgb(210, 48, 54),
+                Color.rgb(45, 80, 165), Color.rgb(157, 98, 42), Color.rgb(220, 55, 145),
+                Color.rgb(170, 90, 205), Color.rgb(190, 170, 45), Color.rgb(60, 175, 185)
+            )
+
+            override fun draw(canvas: Canvas) {
+                val area = bounds
+                val side = min(area.width(), area.height()).toFloat()
+                val cell = side / 3f
+                val left = area.left + (area.width() - side) / 2f
+                val top = area.top + (area.height() - side) / 2f
+
+                for (row in 0..2) {
+                    for (column in 0..2) {
+                        paint.style = Paint.Style.FILL
+                        paint.color = colors[row * 3 + column]
+                        val inset = side * 0.045f
+                        val rect = RectF(
+                            left + column * cell + inset,
+                            top + row * cell + inset,
+                            left + (column + 1) * cell - inset,
+                            top + (row + 1) * cell - inset
+                        )
+                        canvas.drawRect(rect, paint)
+                    }
+                }
+
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = (side * 0.06f).coerceAtLeast(1f)
+                paint.color = Color.rgb(218, 226, 238)
+                canvas.drawRect(
+                    left + paint.strokeWidth / 2f,
+                    top + paint.strokeWidth / 2f,
+                    left + side - paint.strokeWidth / 2f,
+                    top + side - paint.strokeWidth / 2f,
+                    paint
+                )
+            }
+
+            override fun setAlpha(alpha: Int) {
+                paint.alpha = alpha
+            }
+
+            override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) {
+                paint.colorFilter = colorFilter
+            }
+
+            @Deprecated("Deprecated in Android SDK")
+            override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
+
+            override fun getIntrinsicWidth(): Int = dp(24)
+            override fun getIntrinsicHeight(): Int = dp(24)
+        }
+    }
+
+    private fun showPaletteDialog() {
+        val dialogContent = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(8), dp(16), dp(8))
+        }
+
+        dialogContent.addView(sectionLabel("Paleta de colores"))
+
+        val paletteRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+
+        val openPaletteButton = makeButton("Abrir PLAYPAL")
+        paletteRow.addView(openPaletteButton, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, dp(48)
+        ))
+        openPaletteButton.setOnClickListener { openPlaypalPicker() }
+
+        paletteSpinner = Spinner(this)
+        paletteSpinner.adapter = paletteAdapter(currentPaletteLabels())
+        paletteRow.addView(paletteSpinner, LinearLayout.LayoutParams(0, dp(48), 1f).apply {
+            marginStart = dp(8)
+        })
+        dialogContent.addView(paletteRow)
+
+        paletteInfo = TextView(this).apply {
+            textSize = 12f
+            setTextColor(Color.rgb(155, 169, 190))
+            setPadding(0, dp(8), 0, dp(4))
+        }
+        dialogContent.addView(paletteInfo)
+
+        paletteSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (updatingPaletteSpinner) return
+                val nextIndex = if (position == 0) -1 else position - 1
+                if (nextIndex != selectedPaletteIndex) {
+                    selectedPaletteIndex = nextIndex
+                    updatePaletteInfo()
+                    if (currentDoomPatch != null) renderCurrentDoomPatch(resetOffsets = false)
+                }
+            }
+        }
+
+        updatePaletteSpinnerItems()
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Paleta de colores")
+            .setView(dialogContent)
+            .setNegativeButton("Cerrar", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.window?.setLayout(
+                (resources.displayMetrics.widthPixels * 0.92f).toInt(),
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+        }
+        dialog.show()
+    }
+
+    private fun currentPaletteLabels(): List<String> {
+        val items = mutableListOf("Escala de grises")
+        playpalPalettes.indices.forEach { index ->
+            items.add("PLAYPAL · Paleta $index (${index + 1}/${playpalPalettes.size})")
+        }
+        return items
+    }
+
     private fun paletteAdapter(items: List<String>): ArrayAdapter<String> {
         return ArrayAdapter(this, android.R.layout.simple_spinner_item, items).apply {
             setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
@@ -785,13 +945,9 @@ class MainActivity : Activity() {
     }
 
     private fun updatePaletteSpinnerItems() {
-        val items = mutableListOf("Escala de grises")
-        playpalPalettes.indices.forEach { index ->
-            items.add("PLAYPAL · Paleta $index (${index + 1}/${playpalPalettes.size})")
-        }
-
+        if (!::paletteSpinner.isInitialized) return
         updatingPaletteSpinner = true
-        paletteSpinner.adapter = paletteAdapter(items)
+        paletteSpinner.adapter = paletteAdapter(currentPaletteLabels())
         paletteSpinner.setSelection(
             if (selectedPaletteIndex < 0) 0 else selectedPaletteIndex + 1,
             false
@@ -825,6 +981,7 @@ class MainActivity : Activity() {
             setOffset(true, offsetX)
             setOffset(false, offsetY)
             syncOffsetFields()
+            rememberOriginalOffsets()
         }
 
         val paletteLabel = if (palette == null) {
@@ -850,6 +1007,8 @@ class MainActivity : Activity() {
         currentArchiveFormat = null
         currentArchiveEntryIndex = -1
         currentResourceOriginalBytes = null
+        hasOriginalOffsets = false
+        updateResetPositionButtonState()
         updateSaveButtonState()
         updateArchiveSpritesButtonState()
     }
