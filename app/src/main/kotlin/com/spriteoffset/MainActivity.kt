@@ -802,7 +802,7 @@ class MainActivity : Activity() {
             scaleType = ImageView.ScaleType.CENTER
             background = backgroundSource.background.constantState?.newDrawable()?.mutate()
                 ?: backgroundSource.background
-            imageTintList = android.content.res.ColorStateList.valueOf(Color.WHITE)
+            // Leave image tint unset so the palette button keeps its nine original colors.
             minimumWidth = 0
             minimumHeight = 0
             setPadding(dp(9), dp(9), dp(9), dp(9))
