@@ -1120,30 +1120,38 @@ class MainActivity : Activity() {
     }
 
     private fun saveCurrentChanges() {
-        val archiveBytes = currentArchiveBytes
-        if (archiveBytes == null || currentArchiveEntryIndex < 0) {
-            saveDoomPatch()
-            return
-        }
+        val archiveBytes = currentArchiveBytes ?: return
+        if (currentArchiveEntryIndex < 0) return
 
         try {
+            val bitmap = currentBitmap
+                ?: throw IllegalStateException("No hay una imagen compatible seleccionada")
             val originalResource = currentResourceOriginalBytes
                 ?: throw IllegalStateException("No se encontró el recurso original")
 
-            val updatedResource = when {
-                currentDoomPatch != null ->
-                    DoomPatchCodec.withOffsets(currentDoomPatch!!, offsetX, offsetY)
-                PngOffsetChunk.isPng(originalResource) ->
-                    PngOffsetChunk.withOffsets(originalResource, offsetX, offsetY)
-                else -> throw IllegalArgumentException(
-                    "Este formato de imagen todavía no permite guardar offsets dentro del archivo"
-                )
+            // Every supported image resource is written as PNG, including
+            // classic Doom Patch data. The current PLAYPAL is used for Patch
+            // colors, and offsets are stored in the PNG grAb chunk.
+            val updatedResource = encodeBitmapAsPngWithOffsets(bitmap, offsetX, offsetY)
+
+            val sourceEntryName = currentArchiveEntries
+                .firstOrNull { it.entryIndex == currentArchiveEntryIndex }
+                ?.name
+            val replacementEntryName = if (
+                currentArchiveFormat == "PK3" &&
+                !PngOffsetChunk.isPng(originalResource) &&
+                sourceEntryName != null
+            ) {
+                withPngExtension(sourceEntryName)
+            } else {
+                null
             }
 
             pendingArchiveBytes = DoomArchiveWriter.replaceEntry(
-                archiveBytes,
-                currentArchiveEntryIndex,
-                updatedResource
+                originalArchive = archiveBytes,
+                entryIndex = currentArchiveEntryIndex,
+                replacementBytes = updatedResource,
+                replacementEntryName = replacementEntryName
             )
 
             val extension = if (currentArchiveFormat == "PK3") "pk3" else "wad"
@@ -1167,19 +1175,11 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun saveDoomPatch() {
-        val original = currentDoomPatch ?: return
-        try {
-            pendingArchiveBytes = DoomPatchCodec.withOffsets(original, offsetX, offsetY)
-            val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
-                addCategory(Intent.CATEGORY_OPENABLE)
-                type = "application/octet-stream"
-                putExtra(Intent.EXTRA_TITLE, currentDisplayName + "_offsets.lmp")
-            }
-            startActivityForResult(intent, REQUEST_SAVE_PATCH)
-        } catch (error: Exception) {
-            Toast.makeText(this, "No se pudo preparar el Doom Patch: " + error.message, Toast.LENGTH_LONG).show()
-        }
+    private fun withPngExtension(entryName: String): String {
+        val slash = entryName.lastIndexOf('/')
+        val dot = entryName.lastIndexOf('.')
+        val stemEnd = if (dot > slash) dot else entryName.length
+        return entryName.substring(0, stemEnd) + ".png"
     }
 
     private fun exportPng() {
@@ -1210,18 +1210,22 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun encodeBitmapAsPngWithOffsets(
+        bitmap: Bitmap,
+        x: Int,
+        y: Int
+    ): ByteArray {
+        val bitmapStream = ByteArrayOutputStream()
+        if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, bitmapStream)) {
+            throw IllegalStateException("No se pudo codificar el PNG")
+        }
+        return PngOffsetChunk.withOffsets(bitmapStream.toByteArray(), x, y)
+    }
+
     private fun writePendingPng(uri: Uri) {
         val bitmap = pendingPngBitmap ?: return
         try {
-            val bitmapStream = ByteArrayOutputStream()
-            if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, bitmapStream)) {
-                throw IllegalStateException("No se pudo codificar el PNG")
-            }
-            val pngWithOffsets = PngOffsetChunk.withOffsets(
-                bitmapStream.toByteArray(),
-                offsetX,
-                offsetY
-            )
+            val pngWithOffsets = encodeBitmapAsPngWithOffsets(bitmap, offsetX, offsetY)
             contentResolver.openOutputStream(uri, "w")?.use { output ->
                 output.write(pngWithOffsets)
             } ?: throw IllegalArgumentException("No se pudo crear el archivo")
