@@ -39,6 +39,7 @@ class MainActivity : Activity() {
     private var pendingPatchBytes: ByteArray? = null
     private var pendingPngBitmap: Bitmap? = null
     private lateinit var savePatchButton: Button
+    private lateinit var archiveSpritesButton: ImageButton
     private lateinit var paletteSpinner: Spinner
     private lateinit var paletteInfo: TextView
     private var playpalPalettes: List<IntArray> = emptyList()
@@ -94,9 +95,36 @@ class MainActivity : Activity() {
             setPadding(0, dp(3), 0, dp(14))
         })
 
+        val openRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
         val openButton = makeButton("Abrir imagen o WAD/PK3")
-        content.addView(openButton, matchWrap())
+        openRow.addView(openButton, LinearLayout.LayoutParams(
+            0, dp(52), 1f
+        ))
         openButton.setOnClickListener { openImagePicker() }
+
+        archiveSpritesButton = ImageButton(this).apply {
+            contentDescription = "Mostrar sprites reconocidos del WAD o PK3"
+            setImageResource(R.drawable.ic_archive_sprites)
+            scaleType = ImageView.ScaleType.CENTER
+            background = openButton.background.constantState?.newDrawable()?.mutate()
+                ?: openButton.background
+            imageTintList = android.content.res.ColorStateList(
+                arrayOf(
+                    intArrayOf(android.R.attr.state_enabled),
+                    intArrayOf()
+                ),
+                intArrayOf(Color.WHITE, Color.rgb(125, 130, 140))
+            )
+            isEnabled = false
+        }
+        openRow.addView(archiveSpritesButton, LinearLayout.LayoutParams(
+            dp(52), dp(52)
+        ).apply { marginStart = dp(8) })
+        archiveSpritesButton.setOnClickListener { showArchiveSpritesDialog() }
+        content.addView(openRow, matchWrap())
 
         imageInfo = TextView(this).apply {
             text = "Ninguna imagen seleccionada"
@@ -151,7 +179,7 @@ class MainActivity : Activity() {
         }
         modeRow.addView(makeLabel("Vista"))
         val spinner = Spinner(this)
-        val modes = listOf("Auto", "Graphic", "Sprite", "HUD")
+        val modes = listOf("Sprite", "HUD")
         val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, modes)
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         spinner.adapter = adapter
@@ -224,21 +252,45 @@ class MainActivity : Activity() {
         content.addView(exportButton, matchWrap())
         exportButton.setOnClickListener { exportPng() }
 
-        content.addView(TextView(this).apply {
-            text = "Carga un lump PLAYPAL extraído o un archivo IWAD/PWAD que lo contenga. Puedes elegir cualquiera de sus paletas; los espacios transparentes del Doom Patch se conservan. El guardado del Patch no altera sus píxeles comprimidos y el PNG exportado conserva los offsets grAb."
-            textSize = 12f
-            setTextColor(Color.rgb(155, 169, 190))
-            setPadding(0, dp(8), 0, 0)
-        })
     }
 
     private fun makeOffsetGroup(label: String, isX: Boolean): View {
         val group = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         group.addView(makeLabel(label))
+
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
+
+        // Use Android framework drawables instead of Unicode arrows.
+        // This avoids missing-glyph boxes on devices with limited font coverage.
+        val leftButton = if (isX) {
+            makeDirectionalButton(
+                drawableRes = android.R.drawable.arrow_up_float,
+                rotation = 270f,
+                description = "Aumentar offset X"
+            ) {
+                setOffset(
+                    true,
+                    (offsetX.toLong() + 1L).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+                )
+            }
+        } else {
+            // Y uses screen-style coordinates: decreasing Y moves the sprite down.
+            // Keep the DOWN arrow to the left of the value.
+            makeDirectionalButton(
+                drawableRes = android.R.drawable.arrow_down_float,
+                rotation = 0f,
+                description = "Mover sprite hacia abajo (disminuir offset Y)"
+            ) {
+                setOffset(
+                    false,
+                    (offsetY.toLong() - 1L).coerceAtLeast(Int.MIN_VALUE.toLong()).toInt()
+                )
+            }
+        }
+
         val field = EditText(this).apply {
             inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_SIGNED
             setSingleLine(true)
@@ -247,22 +299,86 @@ class MainActivity : Activity() {
             setText(if (isX) offsetX.toString() else offsetY.toString())
         }
         if (isX) xInput = field else yInput = field
-        row.addView(field, LinearLayout.LayoutParams(0, dp(46), 1f))
-        val minus = makeButton("−").apply { textSize = 18f }
-        val plus = makeButton("+").apply { textSize = 18f }
-        row.addView(minus, LinearLayout.LayoutParams(dp(42), dp(42)))
-        row.addView(plus, LinearLayout.LayoutParams(dp(42), dp(42)).apply { marginStart = dp(4) })
-        minus.setOnClickListener { setOffset(isX, (if (isX) offsetX else offsetY) - 1) }
-        plus.setOnClickListener { setOffset(isX, (if (isX) offsetX else offsetY) + 1) }
+
+        val rightButton = if (isX) {
+            makeDirectionalButton(
+                drawableRes = android.R.drawable.arrow_up_float,
+                rotation = 90f,
+                description = "Disminuir offset X"
+            ) {
+                setOffset(
+                    true,
+                    (offsetX.toLong() - 1L).coerceAtLeast(Int.MIN_VALUE.toLong()).toInt()
+                )
+            }
+        } else {
+            // Increasing Y moves the sprite up in the Doom preview coordinate system.
+            // Keep the UP arrow to the right of the value.
+            makeDirectionalButton(
+                drawableRes = android.R.drawable.arrow_up_float,
+                rotation = 0f,
+                description = "Mover sprite hacia arriba (aumentar offset Y)"
+            ) {
+                setOffset(
+                    false,
+                    (offsetY.toLong() + 1L).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+                )
+            }
+        }
+
+        row.addView(leftButton, LinearLayout.LayoutParams(dp(36), dp(42)))
+        row.addView(field, LinearLayout.LayoutParams(0, dp(46), 1f).apply {
+            marginStart = dp(2)
+            marginEnd = dp(2)
+        })
+        row.addView(rightButton, LinearLayout.LayoutParams(dp(36), dp(42)))
+
         field.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                if (!updatingFields) setOffset(isX, s?.toString()?.toIntOrNull() ?: 0, false)
+                if (!updatingFields) {
+                    setOffset(isX, s?.toString()?.toIntOrNull() ?: 0, false)
+                }
             }
             override fun afterTextChanged(s: Editable?) = Unit
         })
+
         group.addView(row)
         return group
+    }
+
+    private fun makeDirectionalButton(
+        drawableRes: Int,
+        rotation: Float,
+        description: String,
+        onClick: () -> Unit
+    ): ImageButton {
+        return ImageButton(this).apply {
+            // Borderless Android ripple keeps the arrows visually secondary
+            // instead of using a raised square that competes with main actions.
+            val ripple = android.util.TypedValue()
+            if (context.theme.resolveAttribute(
+                    android.R.attr.selectableItemBackgroundBorderless,
+                    ripple,
+                    true
+                ) && ripple.resourceId != 0
+            ) {
+                setBackgroundResource(ripple.resourceId)
+            } else {
+                setBackgroundColor(Color.TRANSPARENT)
+            }
+            setImageResource(drawableRes)
+            imageTintList = android.content.res.ColorStateList.valueOf(
+                Color.rgb(174, 188, 207)
+            )
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            setPadding(dp(10), dp(10), dp(10), dp(10))
+            this.rotation = rotation
+            contentDescription = description
+            minimumWidth = 0
+            minimumHeight = 0
+            setOnClickListener { onClick() }
+        }
     }
 
     private fun setOffset(isX: Boolean, value: Int, updateField: Boolean = true) {
@@ -376,17 +492,33 @@ class MainActivity : Activity() {
             updatePaletteInfo()
         }
 
+        updateArchiveSpritesButtonState()
+
         if (contents.sprites.isEmpty()) {
             imageInfo.text = "$archiveName · ${contents.formatName} · no se encontraron sprites gráficos"
             Toast.makeText(
                 this,
-                "No se encontraron sprites en el archivo",
+                "No se encontraron sprites reconocidos en el archivo",
                 Toast.LENGTH_LONG
             ).show()
             return
         }
 
-        val labels = contents.sprites.map { entry ->
+        imageInfo.text = "$archiveName · ${contents.formatName} · ${contents.sprites.size} sprites reconocidos"
+        showArchiveSpritesDialog()
+    }
+
+    private fun updateArchiveSpritesButtonState() {
+        if (!::archiveSpritesButton.isInitialized) return
+        archiveSpritesButton.isEnabled =
+            currentArchiveBytes != null && currentArchiveEntries.isNotEmpty()
+    }
+
+    private fun showArchiveSpritesDialog() {
+        if (currentArchiveBytes == null || currentArchiveEntries.isEmpty()) return
+
+        val entries = currentArchiveEntries
+        val labels = entries.map { entry ->
             val sizeLabel = if (entry.bytes.size >= 1024) {
                 String.format(
                     java.util.Locale.ROOT,
@@ -397,16 +529,173 @@ class MainActivity : Activity() {
                 "${entry.bytes.size} B"
             }
             "${entry.name}  ·  $sizeLabel"
-        }.toTypedArray()
+        }
 
-        AlertDialog.Builder(this)
-            .setTitle("Sprites de $archiveName")
-            .setItems(labels) { _, which ->
-                val entry = currentArchiveEntries.getOrNull(which) ?: return@setItems
-                openResourceBytes(entry.bytes, entry.name, entry.entryIndex)
+        var filteredIndices = entries.indices.toList()
+        val adapter = ArrayAdapter(
+            this,
+            android.R.layout.simple_list_item_1,
+            filteredIndices.map { labels[it] }.toMutableList()
+        )
+
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(8), dp(4), dp(8), dp(2))
+        }
+
+        val titleRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val title = TextView(this).apply {
+            text = "Sprites de $currentArchiveName"
+            textSize = 18f
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setTextColor(Color.WHITE)
+            setPadding(dp(8), 0, dp(4), 0)
+        }
+        titleRow.addView(title, LinearLayout.LayoutParams(0, dp(48), 1f))
+
+        val searchButton = ImageButton(this).apply {
+            contentDescription = "Mostrar u ocultar búsqueda de sprites"
+            setImageResource(android.R.drawable.ic_menu_search)
+            imageTintList = android.content.res.ColorStateList.valueOf(
+                Color.rgb(185, 198, 216)
+            )
+            scaleType = ImageView.ScaleType.CENTER
+            val ripple = android.util.TypedValue()
+            if (context.theme.resolveAttribute(
+                    android.R.attr.selectableItemBackgroundBorderless,
+                    ripple,
+                    true
+                ) && ripple.resourceId != 0
+            ) {
+                setBackgroundResource(ripple.resourceId)
+            } else {
+                setBackgroundColor(Color.TRANSPARENT)
             }
+            minimumWidth = 0
+            minimumHeight = 0
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+        }
+        titleRow.addView(searchButton, LinearLayout.LayoutParams(dp(44), dp(44)))
+        content.addView(titleRow)
+
+        val searchInput = EditText(this).apply {
+            hint = "Buscar sprite..."
+            setSingleLine(true)
+            textSize = 16f
+            inputType = InputType.TYPE_CLASS_TEXT
+            setPadding(dp(10), 0, dp(10), 0)
+            visibility = View.GONE
+        }
+        content.addView(searchInput, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            dp(48)
+        ).apply {
+            bottomMargin = dp(4)
+        })
+
+        val spriteList = ListView(this).apply {
+            setAdapter(adapter)
+            isFastScrollEnabled = true
+            isFastScrollAlwaysVisible = true
+            isScrollbarFadingEnabled = false
+            isVerticalScrollBarEnabled = true
+            scrollBarStyle = View.SCROLLBARS_INSIDE_INSET
+            divider = android.graphics.drawable.ColorDrawable(Color.rgb(63, 70, 82))
+            dividerHeight = dp(1)
+            choiceMode = ListView.CHOICE_MODE_SINGLE
+        }
+        content.addView(spriteList, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            0,
+            1f
+        ))
+
+        searchInput.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                val query = s?.toString()?.trim().orEmpty()
+                filteredIndices = if (query.isEmpty()) {
+                    entries.indices.toList()
+                } else {
+                    val prefixMatches = entries.indices.filter {
+                        entries[it].name.startsWith(query, ignoreCase = true)
+                    }
+                    val otherMatches = entries.indices.filter {
+                        !entries[it].name.startsWith(query, ignoreCase = true) &&
+                            entries[it].name.contains(query, ignoreCase = true)
+                    }
+                    prefixMatches + otherMatches
+                }
+
+                adapter.clear()
+                filteredIndices.forEach { adapter.add(labels[it]) }
+                adapter.notifyDataSetChanged()
+
+                // Matching rows move to the top immediately as the user types.
+                if (filteredIndices.isNotEmpty()) {
+                    spriteList.setSelection(0)
+                }
+            }
+
+            override fun afterTextChanged(s: Editable?) = Unit
+        })
+
+        var searchVisible = false
+        searchButton.setOnClickListener {
+            searchVisible = !searchVisible
+            searchInput.visibility = if (searchVisible) View.VISIBLE else View.GONE
+            if (searchVisible) {
+                searchInput.requestFocus()
+                searchInput.post {
+                    val keyboard = getSystemService(INPUT_METHOD_SERVICE)
+                        as? android.view.inputmethod.InputMethodManager
+                    keyboard?.showSoftInput(
+                        searchInput,
+                        android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT
+                    )
+                }
+            } else {
+                searchInput.setText("")
+                val keyboard = getSystemService(INPUT_METHOD_SERVICE)
+                    as? android.view.inputmethod.InputMethodManager
+                keyboard?.hideSoftInputFromWindow(searchInput.windowToken, 0)
+            }
+        }
+
+        // Match the taller, near-full-screen archive picker used before search was added.
+        val dialogHeight = min(
+            dp(760),
+            (resources.displayMetrics.heightPixels * 0.88f).toInt()
+        )
+        content.layoutParams = ViewGroup.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            dialogHeight
+        )
+        val dialog = AlertDialog.Builder(this)
+            .setView(content)
             .setNegativeButton("Cancelar", null)
-            .show()
+            .create()
+
+        dialog.setOnShowListener {
+            dialog.window?.setLayout(
+                (resources.displayMetrics.widthPixels * 0.92f).toInt(),
+                dialogHeight
+            )
+        }
+
+        spriteList.setOnItemClickListener { _, _, position, _ ->
+            val originalIndex = filteredIndices.getOrNull(position) ?: return@setOnItemClickListener
+            val entry = entries.getOrNull(originalIndex) ?: return@setOnItemClickListener
+            dialog.dismiss()
+            openResourceBytes(entry.bytes, entry.name, entry.entryIndex)
+        }
+
+        dialog.show()
     }
 
     private fun openResourceBytes(
@@ -562,6 +851,7 @@ class MainActivity : Activity() {
         currentArchiveEntryIndex = -1
         currentResourceOriginalBytes = null
         updateSaveButtonState()
+        updateArchiveSpritesButtonState()
     }
 
     private fun updateSaveButtonState() {
@@ -735,7 +1025,7 @@ private class SpritePreviewView(
 ) : View(context) {
     var image: Bitmap? = null
         set(value) { field = value; invalidate() }
-    var previewMode = "Auto"
+    var previewMode = "Sprite"
         set(value) { field = value; invalidate() }
     var offsetX = 0
         set(value) { field = value; invalidate() }
