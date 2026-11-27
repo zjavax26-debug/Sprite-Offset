@@ -187,7 +187,7 @@ internal object DoomArchiveReader {
                     continue
                 }
 
-                val normalizedName = entry.name.replace('\\\\', '/')
+                val normalizedName = entry.name.replace('\\', '/')
                 val baseName = normalizedName.substringAfterLast('/').uppercase(Locale.ROOT)
                 val isPlaypal = baseName == "PLAYPAL" || baseName == "PLAYPAL.PAL"
                 val isSpritePath = normalizedName.split('/').any {
