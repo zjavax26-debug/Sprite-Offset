@@ -1139,8 +1139,8 @@ class MainActivity : Activity() {
                 ?.name
             val replacementEntryName = if (
                 currentArchiveFormat == "PK3" &&
-                !PngOffsetChunk.isPng(originalResource) &&
-                sourceEntryName != null
+                sourceEntryName != null &&
+                !sourceEntryName.endsWith(".png", ignoreCase = true)
             ) {
                 withPngExtension(sourceEntryName)
             } else {
